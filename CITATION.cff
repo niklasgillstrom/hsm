@@ -10,7 +10,7 @@ abstract: >-
   signed supervisory authorisation as the audit record. Companion to
   the gatekeeper supervisory implementation.
 version: "1.0.0"
-date-released: "2026-04-28"
+date-released: "2026-04-30"
 license: MIT
 repository-code: "https://github.com/niklasgillstrom/hsm"
 authors:
