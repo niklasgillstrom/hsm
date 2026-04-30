@@ -13,6 +13,13 @@ version: "1.0.0"
 date-released: "2026-04-30"
 license: MIT
 repository-code: "https://github.com/niklasgillstrom/hsm"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.19930311"
+    description: "Zenodo deposit of v1.0.0"
+  - type: doi
+    value: "10.5281/zenodo.19930396"
+    description: "Companion repository — gatekeeper (supervisory side)"
 authors:
   - family-names: "Gillström"
     given-names: "Niklas"
