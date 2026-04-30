@@ -1,0 +1,14 @@
+{
+  "_comment": "Expected outcome of SecurosysVerifier.verifySecurosysAttestation() against request.json.",
+  "valid": true,
+  "publicKeyMatch": true,
+  "attestationChainValid": true,
+  "csrPublicKeyFingerprint": "c2:e7:bc:ce:c8:ae:e1:ed:22:df:6d:69:6d:ba:45:7f:59:55:4b:28:9b:65:08:92:f9:9b:3e:5c:c7:0d:e0:6f",
+  "attestedPublicKeyFingerprint": "c2:e7:bc:ce:c8:ae:e1:ed:22:df:6d:69:6d:ba:45:7f:59:55:4b:28:9b:65:08:92:f9:9b:3e:5c:c7:0d:e0:6f",
+  "csrPublicKeyAlgorithm": "RSA",
+  "hsmVendor": "Securosys",
+  "hsmModel": "Primus HSM (RSA 4096)",
+  "hsmSerialNumber": "18386101",
+  "keyOrigin": "generated",
+  "keyExportable": false
+}

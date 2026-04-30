@@ -1,0 +1,138 @@
+package eu.gillstrom.hsm.service;
+
+import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.cert.*;
+import java.util.*;
+
+@Service
+public class SwishCaService {
+
+    private static final Logger log = LoggerFactory.getLogger(SwishCaService.class);
+    
+    // Getswish CA certificates (production)
+    private X509Certificate rootCa;
+    private X509Certificate customerCa;
+    private Set<TrustAnchor> trustAnchors;
+    
+    // PEM-encoded Getswish Root CA v2 for Swish
+    private static final String GETSWISH_ROOT_CA = """
+-----BEGIN CERTIFICATE-----
+MIIFrDCCA5SgAwIBAgIJAJ0BfF/2dXw5MA0GCSqGSIb3DQEBDQUAMEsxFDASBgNV
+BAoMC0dldHN3aXNoIEFCMRgwFgYDVQQLDA9Td2lzaCBNZW1iZXIgQ0ExGTAXBgNV
+BAMMEFN3aXNoIFJvb3QgQ0EgdjIwHhcNMTkwNjI2MTQwOTEzWhcNMzkwNjIxMTQw
+OTEzWjBlMQswCQYDVQQGEwJTRTEbMBkGA1UECgwSR2V0c3dpc2ggQUIgKHB1Ymwp
+MREwDwYDVQQFEwhHRVRTV0lTSDEmMCQGA1UEAwwdR2V0c3dpc2ggUm9vdCBDQSB2
+MiBmb3IgU3dpc2gwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQDTUjcB
+ezD8q78jcGbcu/JJy/5wbOcGtxb8r6YwwnKTC/z5oDdu9Ne+ZKZrrHa2Sd9q0DdY
+HQXmzyQ94q9N18Bcqm29JWQA9vsdDg1WQ2qdLc1Bg7K+CMAVUofobeT9LwPN7hlz
+PMkZgGFlwAM4dxmerDHvId4dSxxQ36DmD9KM02g+Il9MhR90I7nBHRQZY9Ww/SAd
+R1ygIY9AmmB0tLfNCLOAw0cKxTv2xlWHJJp+0H0ndNKWZ6z/VB9eBfaxWSh/b0Tb
+Hbd14j7z4RKXxjg2//BLDRTqmFsdFyvVEEQhJmDpg9QBZL3B/SxPhMXKvZf9o633
+lrSCJUQRyTVvpmWe2fchPxRLH+vOiuHZa3U11qXDbqur/eknf11y2gyZd+uoB6hk
+eV89t0Zck6pUyo+6d18NYsd5zJhIaZsG5D0FtgXC06sftHUhye6tAR6yrAhyTC9i
+Qtl7r1mayF0CdBWsxJQvDK82irkXrinnnxRKW1vFbP6Eq+i/Ri8dwL9YwTuLQjMs
+jejazfQEwjIaNg+OqdSawh9pnEB5yKQj5Nu3QeqPgIEWBWSVgTlABYWI41HmrtIe
+8MlWSxJD0IdcT4zjpjWvoQtSlnWGx7LxDHKElOzOdAA//TrAfOPczzFCKbeCxLKq
+rsN1sG5sO/+2ZYMLFgZtNIjJ8lvOA2hErHA4oQIDAQABo3kwdzAPBgNVHRMBAf8E
+BTADAQH/MA4GA1UdDwEB/wQEAwIBBjAdBgNVHQ4EFgQUsGKuoAOq9RjpTSgLM0dl
+Ou1mkTYwHwYDVR0jBBgwFoAUfApAsra7hXo8u0T69LnAnKs5CTgwFAYDVR0gBA0w
+CzAJBgcqhXCBbQEBMA0GCSqGSIb3DQEBDQUAA4ICAQAbszaXwRlyGKXNwlugMQDA
+VQDrm4J3M3vcQtqbUF1++TxzyRabh/E8bgmn1nJaksslYO7oNP6vbnHhgiFiYV6Z
+nbUO4dcmOXgo5LEzP2qWr74PoUM8F/Z3eE6pRFivw/HByY3GMyr/j1s8Rna4t/sM
+qyjI7LDcbzMqxZK1GlDZpYuJMjE3SnTHIngGJEQZaQLV1cMFH9hCS5/LRWljiZI0
+jKXdhjyI1WDZR+NGEqvW0Hwj3n3X8HPIRw+DqLNT5mRZr2RZKmc5Ehiu4NwNmPbd
+SBEpCuXXXDLwwtPsd6Bp0lVI2gPAAEQtxKLR4HsYOJ/O4TcylvSBN+fveWTeEkOk
+aEwLNYvuXRti6prdXLaIOuZf7s+RGDBvs0XieabeTrSDrqEJtxYE7vCc58yKwAM/
+jYPvIja23kMcIEAbttx4Mm+/Xo/RC5+quIGCTurFsgqIkL7J6vIHnKW47p3drxI7
+ecVFgFzZjdoMG2WmFnpEPpUNU2i5Hc6n7Aqz9Tgye9LCSJkY1xr3SF1HD5mDWTqP
+TigcC3PKwGBcJVDAAauwFnpx4K/rKJeQuWaLKdQk4cq57HQ/gcqcjHOJc+N+OpTt
+J3gKROI09rxe4n4sCtfq2nCgIFpd+ONWqJL3VCg+j/mxioNm0uA+F3K6bOG3Lb6a
+oFeq8Cks41XfOnsrmnLfwQ==
+-----END CERTIFICATE-----""";
+    
+    // PEM-encoded Swish Customer CA1 v2 for Swish
+    private static final String SWISH_CUSTOMER_CA = """
+-----BEGIN CERTIFICATE-----
+MIIFxzCCA6+gAwIBAgIIEQI6Bxl6kfAwDQYJKoZIhvcNAQENBQAwZTELMAkGA1UE
+BhMCU0UxGzAZBgNVBAoMEkdldHN3aXNoIEFCIChwdWJsKTERMA8GA1UEBRMIR0VU
+U1dJU0gxJjAkBgNVBAMMHUdldHN3aXNoIFJvb3QgQ0EgdjIgZm9yIFN3aXNoMB4X
+DTIwMDYxNjEyNDYyNFoXDTQwMDYxMTEyNDYyNFowZzELMAkGA1UEBhMCU0UxGzAZ
+BgNVBAoTEkdldHN3aXNoIEFCIChwdWJsKTERMA8GA1UEBRMIR0VUU1dJU0gxKDAm
+BgNVBAMTH1N3aXNoIEN1c3RvbWVyIENBMSB2MiBmb3IgU3dpc2gwggIiMA0GCSqG
+SIb3DQEBAQUAA4ICDwAwggIKAoICAQCrONMhXoO3lbxUJCSUI3eNV143pkesfl7/
+hlNlJmq6HqwQn7aVBzE3KXWkLo7CJqIppKYZkRISmh6HGzkJ1TgVxfeEbsn5tUKG
+M51DA0rFnMB1o0FHC/n6f1EUo7tewAYZTToE2vRaGVT3PFJN1JKYjvLoCLWbYIz9
+z8wdlJUZgjJObWcHPa1yx5/va6SiWDVRBGzmBOli7OFu2NhBy3vec7l1xwnTR910
+mJTHaRVJi/h2MH/rvtKf0cPJJs5Dq9Bn3VeCKXiEyTwNUFwOMv0frx2ebJXPuV+y
+BpAkT/lAd3F/tPfIRMf4lV/tQdE7XM5e7V746vEi1kHGKsKSmDsjx0em6WXEHsXc
+Kv2AUdAZ7cVaa5EyCfmdnTsUgCOOD7SZ1jrBpF+MRquGyOYd01K6LWGRnPnN6Y9I
+mzVd2ka+BoItHaSx92VWXi8MylVS4fdPXbTCmg6+vOhgm8Lyl+qmoHU9H/Pwen+g
+tswfQd9SuSCkt025C4ZivkfhHE3SwcUZ7+/BsVKT8V/ARU/mj1EYoAv5T8plUj4g
+YJiInUdmB27wYGbtb3O8LMXbwM/TrCxuJ5itVGBi/Jmu84gZBRh61j0fKpcqUo3H
+Oi7M28+8KHl0QyP+GNboavvT1TyfJVMdASP8gFXwoSzfEVDvA4H+A6gxSc3+J8Vq
+GQFyuMTsbwIDAQABo3kwdzAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIB
+BjAdBgNVHQ4EFgQU+dULJcoknvo+HczHIGt1p1Yrr5IwHwYDVR0jBBgwFoAUsGKu
+oAOq9RjpTSgLM0dlOu1mkTYwFAYDVR0gBA0wCzAJBgcqhXCBbQEBMA0GCSqGSIb3
+DQEBDQUAA4ICAQB1OP+RpBYmwdpTMFw48GAj4HItGCJaRyELrf9cRPOi88jezhHj
+8IGc/gh0en/zcYiM8a0CGfoG1BiD4ZNieuhYWh3zaOil/LFODNblG7cm0Y2Gyily
+bWhssCxEB25gIX6A2oaKC6LJOTh5aOAu8+zNA8Nlmu49sBqM6igmZwD8VRAx+2EI
+RuRqYlzrMVm2lfcOaaHcnLDmcmb0xU0VPPFfLBQ1D/UKS+BhkHcdYe1fzsq424fH
+Wtx6l0Ni9BzAfzpaAPDwug/Toj9V1ZxdeQ/3gYfo5uR6v200WHA6u73Q3aGHIykz
+EHHJop+TYl7tAuX9BI8K2w6BIFcUdYPvxITMkliqy2mvhgjuLvWbyK/iBJCoAdTW
++u3L3CU4oG5vGrzqT8piGF7fOS9rN1rdfpJ2pSATYA9bUB+XrZuOdwQQDUyu7igu
+OXYyr7Lvkfx1D3yggjYOS5hLjJ0poJtlW5iOckGMfcOmZVytCmMPwk/GPg67a9XB
+Xa/PZT1nqp3PyEBx3wbXnYhmIHQ09IFGFfhD7YXUQBHYv4QW2L7FXVdEA5Sm3aA8
+3Gmp9GoNasgg/92u9xdbuMqt640TpqSQSDormP/2ZHRi+jnoXi56abGLKMM424L/
+lQ4f13lgwOVxOWoi8D05uH7izqhKncLV4v4Q/F2e7ghOJ3Zza6+p1LzPvA==
+-----END CERTIFICATE-----""";
+    
+    @PostConstruct
+    public void init() throws Exception {
+        CertificateFactory cf = CertificateFactory.getInstance("X.509");
+        
+        rootCa = (X509Certificate) cf.generateCertificate(
+            new ByteArrayInputStream(GETSWISH_ROOT_CA.getBytes(StandardCharsets.UTF_8)));
+        customerCa = (X509Certificate) cf.generateCertificate(
+            new ByteArrayInputStream(SWISH_CUSTOMER_CA.getBytes(StandardCharsets.UTF_8)));
+        
+        trustAnchors = Set.of(new TrustAnchor(rootCa, null));
+    }
+    
+    public X509Certificate getCustomerCa() {
+        return customerCa;
+    }
+    
+    public X509Certificate getRootCa() {
+        return rootCa;
+    }
+    
+    /**
+     * Validates that a certificate was issued by Getswish CA chain
+     */
+    public boolean validateCertificateChain(X509Certificate cert) {
+        try {
+            // Build cert path
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            List<X509Certificate> certList = Arrays.asList(cert, customerCa);
+            CertPath certPath = cf.generateCertPath(certList);
+            
+            // Validate against trust anchors
+            PKIXParameters params = new PKIXParameters(trustAnchors);
+            params.setRevocationEnabled(false); // In production it migh be needed to enable CRL/OCSP (if applicable).
+            
+            CertPathValidator validator = CertPathValidator.getInstance("PKIX");
+            validator.validate(certPath, params);
+            return true;
+        } catch (Exception e) {
+            log.warn("Swish CA chain validation failed for certificate '{}': {}",
+                    cert.getSubjectX500Principal().getName(), e.getMessage());
+            return false;
+        }
+    }
+}

@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.0.6</version>
+        <relativePath/>
+    </parent>
+    
+    <groupId>eu.gillstrom</groupId>
+    <artifactId>hsm</artifactId>
+    <version>1.0.0</version>
+    <name>HSM Attestation Reference Implementation</name>
+    <description>
+        Reference implementation for HSM attestation verification with CSR and
+        BankID signing. Implements the financial-entity side of the four-phase
+        supervisory issuance flow described in Gillström (in preparation, CMLJ
+        and CLSR): local verification, gatekeeper.verify, issuance, and
+        gatekeeper.confirm. The companion repository
+        gatekeeper carries the supervisory side.
+
+        Legal basis (Union law):
+          DORA Regulation (EU) 2022/2554 — substantive obligations on the
+            financial entity:
+            Articles 5(2)(b) (management body's authenticity/integrity duty),
+            6(10) (financial entity remains fully responsible for the
+              verification of compliance — the central article this code
+              implements support for),
+            9(2), 9(3)(b)(c)(d), 9(4)(d) (ICT-security control objectives),
+            16 (vulnerability management — supported by the bundled OWASP
+              Dependency-Check plugin),
+            28(1)(a) (full responsibility irrespective of outsourcing),
+            28(6) (retention of ICT third-party records — minimum 5 years
+              for the issuance audit trail represented by IssuanceResponse),
+            30(2)(c) (contractual provisions on data protection;
+              Article 1 in the companion paper Gillström (in preparation)
+              argues that an HSM clause without verification mechanism does
+              not satisfy this provision).
+          DORA Regulation (EU) 2022/2554 — supervisory consequences for the
+            financial entity:
+            Article 33(3) (criteria the Lead Overseer applies to ICT third-
+              party providers — the financial entity's audit record must be
+              capable of supporting the supervisor's assessment);
+            Article 42 (competent authorities follow up on Lead-Overseer
+              recommendations; the financial entity's IssuanceResponse audit
+              record is the evidence the competent authority will inspect);
+            Article 50 (administrative powers — access to documents and
+              on-site inspection extend to the financial entity).
+          BankID — IMPORTANT: the BankID-signature verification layer
+            implemented by BankIdService is NOT a DORA-mandated control.
+            BankID is the Swedish eID that Getswish AB uses for signatory
+            authentication; technical providers integrating with Swish
+            implement BankID-signature verification because that is the
+            operational precondition for certificate issuance, not because
+            DORA prescribes it. DORA mandates HSM-protected key origin
+            (Articles 6(10), 9, 28(1)(a)) — the cryptographic-protection
+            layer in Step 5 of the verification pipeline. It does not
+            specify how the requesting organisation's signatory is
+            authenticated. The bundled BankID verifier therefore handles
+            an integration-side requirement, not a regulatory one. A
+            future change in which eID Swish uses replaces this layer
+            without affecting DORA compliance.
+
+          eIDAS Regulation (EU) 910/2014 — provides only the legal-effect
+            framing for the BankID signatures handled by the contractual
+            mandate-verification layer above; explicitly does NOT apply to
+            the technical provider's HSM-attested payment-signing keys
+            (Swish payment signatures are operational signatures over
+            payment transactions, not eIDAS-recognised legal-act
+            signatures). Articles invoked indirectly:
+              Article 25 (legal effects of electronic signatures — frames
+                the legal weight of a BankID-signed mandate when it is
+                presented as evidence in a downstream dispute);
+              Article 26 (advanced electronic signature requirements —
+                BankID typically meets the AES bar);
+              Article 29 (qualified electronic signature requirements —
+                whether a particular BankID signature reaches QES status
+                depends on whether the BankID-issuing CA is on the EU
+                Trusted List under Article 22; this code does not enforce
+                or assume QES status);
+              Annex II (qualified signature creation device — relevant if
+                a deployment uses BankID-on-card or similar QSCD-based
+                BankID issuance; the Primus HSM used elsewhere in the Swish
+                payment infrastructure is QSCD-capable but the qualified-
+                signature mode is NOT activated, see HARDWARE_BASELINE).
+
+          The mTLS layer between this financial entity and the technical
+            provider's Swish API is operational TLS under DORA Article 9
+            and is governed by the partner agreement — distinct both from
+            the BankID layer above and from any eIDAS qualified-signature
+            status.
+          GDPR Regulation (EU) 2016/679 — Articles 5(1)(c)(e), 17, 23, 32.
+          NIS2 Directive (EU) 2022/2555 — Articles 14, 21, 23.
+
+        Legal basis (Swedish national law):
+          Cybersäkerhetslag (2025:1506) — NIS2 implementation; defines reporting
+            and supervision obligations applicable to the financial entity
+          Lag (2010:751) om betaltjänster — payment service provider obligations
+          Lag (2017:630) om åtgärder mot penningtvätt och finansiering av
+            terrorism — AML obligations relevant to the BankID signatory chain
+          Bokföringslag (1999:1078) — 7 kap. retention of business records
+            (parallel to the audit-evidence retention requirements)
+    </description>
+
+    <developers>
+        <developer>
+            <id>gillstrom</id>
+            <name>Niklas Gillström</name>
+            <url>https://orcid.org/0009-0001-6485-4596</url>
+        </developer>
+    </developers>
+
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://opensource.org/licenses/MIT</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <properties>
+        <java.version>21</java.version>
+    </properties>
+    
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcpkix-jdk18on</artifactId>
+            <version>1.84</version>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>1.84</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>3.0.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+    
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>1.18.46</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+
+            <!--
+                Maven Enforcer — fails the build if Maven itself is older than
+                3.6.3. This is the floor required by the OWASP Dependency-Check
+                plugin 12.x configured below; it is also a sensible baseline
+                given Spring Boot 4.x's own toolchain assumptions. Without this
+                rule, an operator running an old Maven would silently fall back
+                to an older OWASP plugin and miss CVE checks the build is
+                supposed to enforce.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>enforce-maven</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <requireMavenVersion>
+                                    <version>3.6.3</version>
+                                </requireMavenVersion>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+                OWASP Dependency-Check — continuous CVE scanning over all
+                project dependencies (and their transitives). The financial
+                entity is required under DORA Regulation (EU) 2022/2554
+                Article 9 (ICT risk management) and Article 16 (vulnerability
+                management) to maintain ongoing visibility into known
+                vulnerabilities in third-party software components used in
+                its ICT environment. The build fails on CVSS >= 7.0
+                (HIGH/CRITICAL) by default; MEDIUM and LOW findings are
+                reported but do not break the build, so the operator can
+                triage them via the suppression file
+                (.owasp-suppressions.xml in the repo root).
+
+                First run downloads the NVD database (~150 MB, cached in
+                ~/.m2). Set the NVD_API_KEY environment variable
+                (https://nvd.nist.gov/developers/request-an-api-key) to
+                raise the rate limit from 5 to 50 calls per 30s.
+            -->
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
+                <version>12.2.1</version>
+                <configuration>
+                    <failBuildOnCVSS>7</failBuildOnCVSS>
+                    <formats>
+                        <format>HTML</format>
+                        <format>JSON</format>
+                    </formats>
+                    <suppressionFiles>
+                        <suppressionFile>${project.basedir}/.owasp-suppressions.xml</suppressionFile>
+                    </suppressionFiles>
+                    <nvdApiKey>${env.NVD_API_KEY}</nvdApiKey>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

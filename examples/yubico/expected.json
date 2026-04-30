@@ -1,0 +1,14 @@
+{
+  "_comment": "Expected outcome of YubicoVerifier.verifyYubicoAttestation() against request.json. The csrPublicKeyFingerprint and attestedPublicKeyFingerprint must match (publicKeyMatch=true) \u2014 this is the binding step that prevents attestation reuse with a substituted CSR.",
+  "valid": true,
+  "publicKeyMatch": true,
+  "attestationChainValid": true,
+  "csrPublicKeyFingerprint": "b6:be:58:2f:60:e7:e3:21:04:f4:4b:28:4d:07:b3:72:97:99:4b:0b:8d:4f:0f:ca:68:c0:f3:72:a4:64:5e:e3",
+  "attestedPublicKeyFingerprint": "b6:be:58:2f:60:e7:e3:21:04:f4:4b:28:4d:07:b3:72:97:99:4b:0b:8d:4f:0f:ca:68:c0:f3:72:a4:64:5e:e3",
+  "csrPublicKeyAlgorithm": "RSA",
+  "hsmVendor": "Yubico",
+  "hsmModel": "YubiHSM 2",
+  "hsmSerialNumber": "20783176",
+  "keyOrigin": "generated",
+  "keyExportable": false
+}

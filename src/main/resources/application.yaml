@@ -1,0 +1,56 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: hsm
+
+swish:
+  # Gatekeeper client configuration. The supervisory architecture in
+  # Gillstrom (in preparation, CMLJ and CLSR) requires that the financial
+  # entity's own verifier is independently witnessed by a gatekeeper
+  # operated by (or on behalf of) the National Competent Authority,
+  # which signs verification receipts and confirms issuance — closing
+  # the loop on DORA Regulation (EU) 2022/2554 Article 6(10).
+  #
+  # The protocol is two-step: verify (returns a signed receipt) followed
+  # by confirm (after issuance, gatekeeper checks the issued cert's
+  # public key matches the one it approved).
+  gatekeeper:
+    # fail-closed (default) — refuses every gatekeeper call; SIGNING requests fail.
+    # mock          — in-process mock that signs receipts with an ephemeral key.
+    #                 NOT for production. Auto-registers its certificate with the
+    #                 GatekeeperKeyRegistry so receipts validate locally.
+    # http          — POST canonical request bodies to the configured URL and
+    #                 parse JSON responses. Production wiring.
+    mode: ${SWISH_GATEKEEPER_MODE:fail-closed}
+    # Base URL of the gatekeeper. The client appends /v1/attestation/{countryCode}/verify
+    # and /v1/attestation/{countryCode}/confirm.
+    url: ${SWISH_GATEKEEPER_URL:http://localhost:8443}
+    # ISO 3166-1 alpha-2 jurisdiction this entity operates in. Used in the
+    # gatekeeper URL path. Default: SE (Sweden).
+    country-code: ${SWISH_GATEKEEPER_COUNTRY_CODE:SE}
+    timeout-ms: ${SWISH_GATEKEEPER_TIMEOUT_MS:5000}
+    # Comma-separated list of PEM-encoded X.509 certificates whose subject
+    # public keys are accepted as authoritative gatekeeper signing certificates.
+    # If unset, no receipts will validate. Set in production to the operating
+    # NCA's gatekeeper certificate(s).
+    trusted-keys: ${SWISH_GATEKEEPER_TRUSTED_KEYS:}
+
+  issuance:
+    # mock — issues a leaf certificate signed by an ephemeral in-process test
+    #        CA. NOT for production; the only mode shipped in this reference repo.
+    # In production, wire up an external Getswish CA integration via a custom
+    # IssuanceClient implementation.
+    mode: ${SWISH_ISSUANCE_MODE:mock}
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: method
+
+logging:
+  level:
+    eu.gillstrom.hsm: DEBUG
