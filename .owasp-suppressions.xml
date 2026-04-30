@@ -6,6 +6,6 @@
         <cve>CVE-2026-41238</cve>
         <cve>CVE-2026-41239</cve>
         <cve>CVE-2026-41240</cve>
-        <vulnerabilityName regex="true">.*ADD_TAGS.*FORBID_TAGS.*</vulnerabilityName>
+        <vulnerabilityName regex="true">(?s).*ADD_TAGS.*FORBID_TAGS.*</vulnerabilityName>
     </suppress>
 </suppressions>
