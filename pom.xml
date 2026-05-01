@@ -13,7 +13,7 @@
     
     <groupId>eu.gillstrom</groupId>
     <artifactId>hsm</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <name>HSM Attestation Reference Implementation</name>
     <description>
         Reference implementation for HSM attestation verification with CSR and
