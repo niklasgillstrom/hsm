@@ -1,6 +1,16 @@
 # Peer-review guide — hsm
 
-This document is written for a peer reviewer of Article 1 (Gillström, in preparation; target venue: *Capital Markets Law Journal*) and Article 2 (Gillström, in preparation; target venue: *Computer Law & Security Review*) who wants to reproduce the central verification claims these articles make. The companion repo `gatekeeper/` carries the supervisory API shell; this repo carries the verifier core and the BankID-based certificate-issuance flow that surrounds it.
+This document is written for a peer reviewer of Article 1 (Gillström, in preparation; target venue: *Capital Markets Law Journal*) and Article 2 (Gillström, in preparation; target venue: *Computer Law & Security Review*) who wants to reproduce the central verification claims these articles make. Companion repos `gatekeeper/` and `railgate/` complete the **triadic system** (since v1.2.0) described in Article 1 §4.2 and Article 2 §9.3:
+
+- **hsm** (this repo) carries the verifier core and the BankID-based certificate-issuance flow that surrounds it.
+- **gatekeeper** is the NCA-facing supervisory API shell that wraps those verifiers for regulatory use, and from v1.1.0 also exposes the settlement-time signature verification endpoint that railgate consumes.
+- **railgate** is the central-bank settlement-rail enforcement layer that calls gatekeeper's verification endpoint at settlement time (RIX-INST in Sweden; generalisable to TIPS, FedNow, FPS, NPP).
+
+The three components together operationalise the data-minimised quadruple-triangulation model: only digest, signature, and certificate identifiers traverse the supervisor boundary — no transaction payload content is exposed at any layer.
+
+## Version 1.2.0 — what's new for hsm reviewers
+
+hsm itself has **no code changes** in v1.2.0 relative to v1.0.0. The version bump aligns hsm with the gatekeeper and railgate companion artefacts so the trio carries a uniform version number, and ships updated cross-references (`CROSS_REFERENCE.md`) plus this peer-review-guide section so reviewers can navigate the triadic system from any of the three repositories. The verifier core and the BankID-issuance flow in this repo are unchanged and reviewers' reproducible-assertion notes from v1.0.0 still apply unchanged.
 
 ---
 

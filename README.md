@@ -373,6 +373,16 @@ Production deployment requires, beyond the reference configuration shipped here:
 
 Known limitations are documented in `PEER_REVIEW_GUIDE.md` and `THREAT_MODEL.md` at the repository root.
 
+## Companion repositories — the triadic system (since v1.2.0)
+
+This repository is the financial-entity-side artefact of a three-component reference implementation. The triadic system together operationalises the data-minimised quadruple-triangulation model described in the companion academic articles (Article 1 §4.2, Article 2 §9.3):
+
+- **hsm** — this repository, financial-entity-side HSM attestation verification core: <https://github.com/niklasgillstrom/hsm> ([10.5281/zenodo.19930310](https://doi.org/10.5281/zenodo.19930310), concept DOI)
+- **gatekeeper** — NCA-operated certificate-issuance gate; from v1.1.0 also exposes `POST /api/v1/verify` for settlement-time signature verification: <https://github.com/niklasgillstrom/gatekeeper> ([10.5281/zenodo.19930395](https://doi.org/10.5281/zenodo.19930395), concept DOI)
+- **railgate** — central-bank settlement-rail enforcement (RIX-INST in Sweden; generalisable to TIPS, FedNow, FPS, NPP): <https://github.com/niklasgillstrom/railgate> ([10.5281/zenodo.19952991](https://doi.org/10.5281/zenodo.19952991), concept DOI)
+
+The hsm reference does not call gatekeeper's settlement-time verification endpoint directly — that path is exercised by railgate at the central-bank settlement layer. hsm interacts with gatekeeper at certificate issuance time via the two-step verify/confirm protocol (see "Four-phase supervisory issuance flow" above).
+
 ## How to cite
 
 See `CITATION.cff` for citation metadata. GitHub renders a "Cite this repository" button from this file once the repo is public.

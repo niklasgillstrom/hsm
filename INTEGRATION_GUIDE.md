@@ -6,6 +6,8 @@ This repo is **not a deployable standalone service** in the way the sibling `gat
 
 The audience is a **systems / integration engineer** at the FE who has been asked to wire DORA Article 6(10) verification into the FE's certificate-issuance pipeline. Operational responsibilities, regulatory framing and inspection procedures live in the sibling gatekeeper repo's `SUPERVISORY_OPERATIONS.md` and `FORENSIC_INSPECTION.md`.
 
+**Triadic system note (since v1.2.0).** The reference architecture now includes a third companion artefact — `railgate/` — for settlement-time enforcement at the central-bank rail (RIX-INST in Sweden; TIPS, FedNow, FPS, NPP elsewhere). railgate calls gatekeeper's `POST /api/v1/verify` endpoint at settlement time. From an FE-integration perspective, railgate is **out of scope for this guide** — the FE does not interact with railgate directly. The FE integrates with gatekeeper at certificate issuance (the flow this guide describes); railgate operates downstream at the central-bank settlement layer using the cryptographic artefacts the FE has already produced and registered. Implementing the gatekeeper-issuance integration described in this guide is sufficient for the FE-side responsibility; the settlement-rail enforcement layer is the central bank's deployment concern.
+
 ---
 
 ## 1. What this repo provides

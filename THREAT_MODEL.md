@@ -1,6 +1,8 @@
 # Threat model — hsm
 
-**Scope.** Threat model for the HSM attestation verification library and the BankID-based certificate-issuance flow surrounding it. The companion gatekeeper repo (`gatekeeper/`) has its own threat model.
+**Scope.** Threat model for the HSM attestation verification library and the BankID-based certificate-issuance flow surrounding it. The companion repositories `gatekeeper/` (supervisory gatekeeper API + settlement-time signature verification endpoint) and `railgate/` (central-bank settlement-rail enforcement) have their own threat models covering threats specific to those layers. This document focuses on threats specific to the financial-entity side.
+
+**v1.2.0 scope.** No code changes in hsm relative to v1.0.0; the threats and mitigations enumerated below are unchanged. The triadic-system threat surface is covered by the union of the three repositories' THREAT_MODEL.md documents.
 
 **Assumptions out of scope.** The hardware platform on which the code runs, the operating system, the JVM, and the wider network are not modelled here. For the operational environment of the case study deployment, see `HARDWARE_BASELINE.md` §3.1 (locked rack, dual-ISP, UPS, FDE with manual unlock, dual switches, Wazuh SIEM, gapless audit log pipeline). The threat model below treats those as sound and focuses on what the Java code itself can and cannot guarantee.
 

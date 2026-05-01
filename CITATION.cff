@@ -7,10 +7,14 @@ abstract: >-
   Article 28(1)(a) and 28(6): a Spring Boot client that submits HSM
   attestation evidence to a supervisory gatekeeper, executes the
   two-step verify/confirm protocol, and retains the cryptographically
-  signed supervisory authorisation as the audit record. Companion to
-  the gatekeeper supervisory implementation and the railgate
-  settlement-rail enforcement component.
-version: "1.1.0"
+  signed supervisory authorisation as the audit record. Version 1.2.0
+  brings hsm into version-sync with the gatekeeper and railgate
+  companion artefacts and updates the cross-references and peer-review
+  documentation to reflect the triadic system (hsm + gatekeeper +
+  railgate). No code changes since v1.0.0. Companions: gatekeeper
+  (NCA-operated certificate-issuance gate and settlement-time signature
+  verification) and railgate (central-bank settlement-rail enforcement).
+version: "1.2.0"
 date-released: "2026-05-01"
 license: MIT
 repository-code: "https://github.com/niklasgillstrom/hsm"
