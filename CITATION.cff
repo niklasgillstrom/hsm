@@ -7,15 +7,17 @@ abstract: >-
   Article 28(1)(a) and 28(6): a Spring Boot client that submits HSM
   attestation evidence to a supervisory gatekeeper, executes the
   two-step verify/confirm protocol, and retains the cryptographically
-  signed supervisory authorisation as the audit record. Version 1.2.0
-  brings hsm into version-sync with the gatekeeper and railgate
-  companion artefacts and updates the cross-references and peer-review
-  documentation to reflect the triadic system (hsm + gatekeeper +
-  railgate). No code changes since v1.0.0. Companions: gatekeeper
+  signed supervisory authorisation as the audit record. Version 1.3.0 corrects
+  defects found when the implementation was checked against its documentation: cloud-HSM attestation attributes
+  are no longer asserted without being parsed, an empty certificate path
+  no longer counts as a validated chain, BankID chain validation pins
+  the Member Banks roots instead of trusting the caller-supplied chain,
+  and BankID OCSP verification follows all seven steps of BankID's
+  published procedure. Companions: gatekeeper
   (NCA-operated certificate-issuance gate and settlement-time signature
   verification) and railgate (central-bank settlement-rail enforcement).
-version: "1.2.0"
-date-released: "2026-05-01"
+version: "1.3.0"
+date-released: "2026-07-27"
 license: MIT
 repository-code: "https://github.com/niklasgillstrom/hsm"
 authors:

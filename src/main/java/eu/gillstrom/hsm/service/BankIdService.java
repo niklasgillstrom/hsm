@@ -1,9 +1,14 @@
 package eu.gillstrom.hsm.service;
 
 import lombok.Data;
+import org.bouncycastle.asn1.ocsp.OCSPObjectIdentifiers;
+import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.ocsp.BasicOCSPResp;
 import org.bouncycastle.cert.ocsp.OCSPResp;
 import org.bouncycastle.cert.ocsp.SingleResp;
+import org.bouncycastle.operator.jcajce.JcaContentVerifierProviderBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -24,6 +29,7 @@ import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.cert.CertPathValidator;
 import java.security.cert.CertificateFactory;
 import java.security.cert.PKIXParameters;
@@ -40,6 +46,140 @@ import java.util.Set;
 public class BankIdService {
 
     private static final Logger log = LoggerFactory.getLogger(BankIdService.class);
+
+    /**
+     * Pinned BankID root certificates for the signature chain.
+     *
+     * <p>The trust anchor must never be taken from the chain the caller
+     * submits. Doing so lets an attacker present a self-signed root of their
+     * own making, together with a user certificate carrying any personal
+     * identity number they choose, and have the whole chain validate.</p>
+     *
+     * <p>These are the {@code OU=BankID Member Banks CA} roots, which anchor
+     * end-user certificates. A BankID signature chains user certificate to
+     * issuing bank CA to bank CA to root, e.g.
+     * {@code NIKLAS GILLSTROM -> SEB Customer CA3 v1 for BankID -> SEB CA v1
+     * for BankID -> BankID Root CA v1}. The intermediates travel inside the
+     * signature, so only the root has to be pinned, and one anchor covers
+     * every issuing bank.</p>
+     *
+     * <p>Not to be confused with {@code BankID SSL Root CA v1}
+     * ({@code OU=Infrastructure CA}), which anchors the mTLS channel to the
+     * BankID RP API and is a different hierarchy. Pinning that root here would
+     * reject every valid signature.</p>
+     *
+     * <p>Production: {@code BankID Root CA v1}, SKI
+     * {@code 67:8A:BA:B2:EA:48:1C:7A:F5:3B:68:37:27:72:06:EB:91:63:CB:53},
+     * valid until 2034-12-31. Test: {@code Test BankID Root CA v1 Test}, SKI
+     * {@code 4A:F7:A3:6A:08:DA:08:38:17:19:53:28:C8:DA:A6:D6:34:D8:5A:BA}.
+     * Both are delivered by BankID on request; verify a candidate by checking
+     * that its SKI equals the Authority Key Identifier of the bank CA at the
+     * top of a real signature chain.</p>
+     */
+    private static final String BANKID_ROOT_CA_V1 = """
+            -----BEGIN CERTIFICATE-----
+            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
+            -----END CERTIFICATE-----
+            """;
+
+    private static final String TEST_BANKID_ROOT_CA_V1_TEST = """
+            -----BEGIN CERTIFICATE-----
+            MIIF0jCCA7qgAwIBAgIISpGbuE9LL/0wDQYJKoZIhvcNAQENBQAwbTEkMCIGA1UE
+            CgwbRmluYW5zaWVsbCBJRC1UZWtuaWsgQklEIEFCMR8wHQYDVQQLDBZCYW5rSUQg
+            TWVtYmVyIEJhbmtzIENBMSQwIgYDVQQDDBtUZXN0IEJhbmtJRCBSb290IENBIHYx
+            IFRlc3QwHhcNMTEwOTIyMTQwMTMzWhcNMzQxMjMxMTQwMTMzWjBtMSQwIgYDVQQK
+            DBtGaW5hbnNpZWxsIElELVRla25payBCSUQgQUIxHzAdBgNVBAsMFkJhbmtJRCBN
+            ZW1iZXIgQmFua3MgQ0ExJDAiBgNVBAMMG1Rlc3QgQmFua0lEIFJvb3QgQ0EgdjEg
+            VGVzdDCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBANPXoOB9BQOW8i2C
+            Kk7U/d8rFNB0ktVlcgBSh8CKvnTsW3i+NrAM5LY9jgAO9vkHT3bl3nK626zePhmh
+            dhVXMKAanbcF/NJ/oSF+DKCGx/VgPmCCqVyTMLjID/59diiLg3xNH3NaaBM69qnw
+            5yOCYkB2wXxcATLO0eTxvL0vdKGJ2HU2AcEtaMMxrScuNCztPuwjYNP0KrYI+y/J
+            Gkf2dBhomAhDLdQSSW3zXqYgbQvJ8La2ECgo3rGQQRZG9/5MZ5dOWtpAx0ybeCbh
+            CPO8XIBCHrPZxv60gZK1CTwlZUoMTBSivv+vmFrH8JdmUnOP9e/wNhuM9/fQ0h5t
+            4BGXoz8M5nxdH6uNJG5SpdxaXYflezBb7YdjgNiF9Yqo3DYTRrZT7dyRLYqlmKQh
+            T1pqEov1tkXktQF8r1QJkTJO3x1QEzMNCnHyN8iDOqENSE4nhkzU9ESbXNOhFpnc
+            XJqoFwvbeAJpV7fVwn+Jumyc/zsD9t+1Vo1lM95q1geVPfnA5z7NZ+uaayJx4DhL
+            MvufDI17fqgiWHe+BMA/vGd8OjFK3JUmCV+7QeG/Z3JWbzU0GeDljqO+H4CQ0+LO
+            4E4JGEZtxfUu4/XuOkCqiZ4/shoPOOxaXcZlBEMHsDzei0tNSKIxB+PoDTje/BQC
+            lunVZvjcG2ehpeF540EXgzzECaNLAgMBAAGjdjB0MB0GA1UdDgQWBBRK96NqCNoI
+            OBcZUyjI2qbWNNhaujAPBgNVHRMBAf8EBTADAQH/MB8GA1UdIwQYMBaAFEr3o2oI
+            2gg4FxlTKMjaptY02Fq6MBEGA1UdIAQKMAgwBgYEKgMEBTAOBgNVHQ8BAf8EBAMC
+            AQYwDQYJKoZIhvcNAQENBQADggIBAJVcP9Sm2tukKW0Qx8EZG9gdXfCmNMrHXF3g
+            via5zpuSMl9wdXHd1FPdGFshRZJ2sW4mb9vRI81vBIXMFVtLZFzeGHoKyz1g8hfj
+            uuLKpItw0OwVNdvSRq/TKKxjVKpvt50Eydgnz4Q59YkFlGVyi7+z74mGfvN06Ssj
+            2WIRtr3UD+IC6Tie6Lm/zuZs4gu0ZP/fddKh7gC3syHLNXQmN+9Y0wkdO7H98K/9
+            uuIrxWtSOFVatxesw7XJRnq+uYI0IdP8xP8U4S680rTse7nsTguQxzRs2vOyoaXm
+            Fdf7XQ03btd15Z4yJlEfs9/4ohgafMs49PMkACqyX45/4WBygO0QwMGVIUnKNFBt
+            /I+0T2SkWFa2JdcRCSTObb7tesoeTIPgI9UcrMvNOG3gxGpB/H5/s7jTV0AOoDgM
+            hOxieGgyTsZ3oP0k6bc47FJ4nE+vifAluyeXioB5JaN2kvm8eqfzC05zSF40V9GA
+            zElVDbsBPR/2CE6CMyR+eqip4gDSZ6mnZYPeBecEXU4Xu+RAgqYxjKosfxOpMZsN
+            +2BSm5QSRLhHacPQTnoQxujnGuUzh5TdAbWqmS0cKEZJ+CACmVLyOphdRoeEQCqQ
+            8DYAyOtq2S4+hAJW+2Xq4NCdvmjm99r2RFkibSlLtqctj1JyzUC6huUiQXx9KZ8n
+            FA0TsFHG
+            -----END CERTIFICATE-----
+            """;
+
+    private final Set<TrustAnchor> bankIdTrustAnchors;
+
+    public BankIdService() {
+        try {
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            this.bankIdTrustAnchors = Set.of(
+                    new TrustAnchor(loadPinnedRoot(cf, BANKID_ROOT_CA_V1), null),
+                    new TrustAnchor(loadPinnedRoot(cf, TEST_BANKID_ROOT_CA_V1_TEST), null));
+        } catch (Exception e) {
+            // Fail-closed: without pinned roots there is nothing to anchor
+            // against, so refuse to construct the bean and let startup fail.
+            throw new IllegalStateException(
+                    "Failed to load pinned BankID root certificates - BankIdService cannot be constructed", e);
+        }
+    }
+
+    /**
+     * Test seam. The pinned roots are compile-time constants, so a synthetic
+     * chain built in a unit test can never validate against them. This
+     * constructor lets a test supply its own anchors and exercise the real
+     * validation logic; production code uses the no-arg constructor and cannot
+     * reach this one.
+     */
+    BankIdService(Set<TrustAnchor> trustAnchors) {
+        this.bankIdTrustAnchors = Set.copyOf(trustAnchors);
+    }
+
+    private static X509Certificate loadPinnedRoot(CertificateFactory cf, String pem) throws Exception {
+        return (X509Certificate) cf.generateCertificate(
+                new ByteArrayInputStream(pem.trim().getBytes(StandardCharsets.UTF_8)));
+    }
 
     /**
      * Verify a BankID signature response.
@@ -91,9 +231,10 @@ public class BankIdService {
             // Optional OCSP cross-check for signing time and status.
             Instant producedAt = null;
             if (ocspBase64 != null && !ocspBase64.isBlank()) {
-                OcspCheck ocsp = checkOcsp(ocspBase64, userCert);
-                if (!ocsp.matchesCertificate) {
-                    return BankIdResult.invalid("OCSP response does not match BankID certificate");
+                OcspCheck ocsp = checkOcsp(ocspBase64, userCert, signatureBase64);
+                if (!ocsp.ok()) {
+                    return BankIdResult.invalid("OCSP verification failed: "
+                            + String.join("; ", ocsp.errors));
                 }
                 producedAt = ocsp.producedAt;
             }
@@ -109,13 +250,24 @@ public class BankIdService {
                 return BankIdResult.invalid("No personalNumber in certificate");
             }
 
-            // Extract user-visible data from the signed DOM (not regex).
-            String usrVisibleData = decodeBase64Text(firstElementText(doc, "usrVisibleData"));
-            String usrNonVisibleData = decodeBase64Text(firstElementText(doc, "usrNonVisibleData"));
+            // Read the payload only from inside the element the signature's
+            // Reference actually covers. Reading with getElementsByTagName over
+            // the whole document meant an attacker could place a
+            // usrVisibleData element outside the signed data, earlier in
+            // document order, and have it returned instead of the signed one —
+            // the signature would still validate, because the injected element
+            // is not part of what was signed.
+            Element signedData = uniqueSignedData(doc);
+            if (signedData == null) {
+                return BankIdResult.invalid("Missing or ambiguous bankIdSignedData element");
+            }
+
+            String usrVisibleData = decodeBase64Text(firstElementText(signedData, "usrVisibleData"));
+            String usrNonVisibleData = decodeBase64Text(firstElementText(signedData, "usrNonVisibleData"));
 
             String relyingPartyName = null;
             String relyingPartyOrgNumber = null;
-            String srvInfoName = firstElementText(doc, "srvInfo", "name");
+            String srvInfoName = firstElementText(signedData, "srvInfo", "name");
             if (srvInfoName != null) {
                 String decoded = decodeBase64Text(srvInfoName);
                 if (decoded != null) {
@@ -127,10 +279,7 @@ public class BankIdService {
                 }
             }
 
-            String signatureTimeRaw = firstElementText(doc, "signingTime");
-            if (signatureTimeRaw == null) {
-                signatureTimeRaw = firstElementText(doc, "bankIdSignedData", "signingTime");
-            }
+            String signatureTimeRaw = firstElementText(signedData, "signingTime");
 
             BankIdResult result = new BankIdResult();
             result.setValid(signatureValid && chainValid);
@@ -305,41 +454,33 @@ public class BankIdService {
         }
         try {
             CertificateFactory cf = CertificateFactory.getInstance("X.509");
-            // The chain submitted for CertPathValidator must not include the
-            // trust anchor; split it off.
-            X509Certificate root = certs.get(certs.size() - 1);
-            List<X509Certificate> path = certs.subList(0, certs.size() - 1);
-            if (path.isEmpty()) {
-                // Single self-signed cert — verify against itself.
-                root.verify(root.getPublicKey());
-                root.checkValidity();
-                verifyBankIdRootIssuer(root, errors);
-                return errors.isEmpty();
+            // Anchor against the pinned roots, never against a certificate the
+            // caller supplied. Any cert in the submitted chain that is already
+            // one of our anchors is dropped: PKIX rejects a path containing the
+            // anchor itself.
+            List<X509Certificate> path = new ArrayList<>();
+            for (X509Certificate c : certs) {
+                boolean pinnedAnchor = bankIdTrustAnchors.stream().anyMatch(a ->
+                        a.getTrustedCert().getSubjectX500Principal().equals(c.getSubjectX500Principal()));
+                if (!pinnedAnchor) {
+                    path.add(c);
+                }
             }
-            Set<TrustAnchor> anchors = Collections.singleton(new TrustAnchor(root, null));
-            PKIXParameters params = new PKIXParameters(anchors);
+            if (path.isEmpty()) {
+                errors.add("Certificate chain contains no certificate below a pinned BankID root");
+                return false;
+            }
+            PKIXParameters params = new PKIXParameters(bankIdTrustAnchors);
             params.setRevocationEnabled(false);
             CertPathValidator validator = CertPathValidator.getInstance("PKIX");
             validator.validate(cf.generateCertPath(path), params);
-
-            verifyBankIdRootIssuer(root, errors);
-            return errors.isEmpty();
+            return true;
         } catch (Exception e) {
             errors.add("Chain validation error: " + e.getMessage());
             return false;
         }
     }
 
-    private void verifyBankIdRootIssuer(X509Certificate root, List<String> errors) {
-        String issuer = root.getIssuerX500Principal().getName();
-        String subject = root.getSubjectX500Principal().getName();
-        boolean looksLikeBankId =
-                issuer.contains("BankID") || issuer.contains("Finansiell ID-Teknik")
-                        || subject.contains("BankID") || subject.contains("Finansiell ID-Teknik");
-        if (!looksLikeBankId) {
-            errors.add("Root certificate does not appear to be from BankID");
-        }
-    }
 
     /**
      * OCSP verification using BouncyCastle. Confirms that the OCSP response
@@ -347,31 +488,109 @@ public class BankIdService {
      * returns the OCSP {@code producedAt} timestamp as the authoritative
      * signing time.
      */
-    private OcspCheck checkOcsp(String ocspBase64, X509Certificate userCert) {
+    /**
+     * OCSP verification following BankID's published procedure for verifying
+     * signatures, which prescribes seven steps. This method covers steps 1, 2,
+     * 3, 5 and 6; steps 4 and 7 (certificate chain and XML-DSig signature) are
+     * handled by {@link #verifyCertificateChain} and {@link #verifyXmlSignature}.
+     *
+     * <p>The previous implementation matched only the certificate serial number
+     * and read {@code producedAt}. It never looked at {@code CertStatus}, so a
+     * revoked certificate passed; it never verified the signature on the
+     * response, so the response could be fabricated; and it never checked the
+     * nonce, so a response issued for one signature could be replayed against
+     * another.</p>
+     *
+     * <p><b>Nonce binding.</b> BankID's procedure says the OCSP nonce must
+     * match "digest of signature" without specifying the construction. Measured
+     * against production responses, the first 20 bytes of the 32-byte nonce are
+     * SHA-1 over the base64 string of the signature — the string as transmitted
+     * and stored, not the decoded XML bytes. The remaining 12 bytes differ
+     * between responses and are not derivable from the signature, so only the
+     * first 20 are compared. That is sufficient for the property the step
+     * exists to establish: a response issued for a different signature is
+     * rejected.</p>
+     */
+    private OcspCheck checkOcsp(String ocspBase64, X509Certificate userCert, String signatureBase64) {
         OcspCheck out = new OcspCheck();
         try {
-            byte[] ocspBytes = Base64.getDecoder().decode(ocspBase64);
-            OCSPResp resp = new OCSPResp(ocspBytes);
-            Object body = resp.getResponseObject();
-            if (!(body instanceof BasicOCSPResp basic)) {
-                log.warn("OCSP response is not a BasicOCSPResp ({}): ignoring", body);
+            OCSPResp resp = new OCSPResp(Base64.getDecoder().decode(ocspBase64));
+            if (resp.getStatus() != OCSPResp.SUCCESSFUL) {
+                out.errors.add("OCSP responder returned status " + resp.getStatus());
                 return out;
             }
-            SingleResp[] singles = basic.getResponses();
-            for (SingleResp single : singles) {
+            if (!(resp.getResponseObject() instanceof BasicOCSPResp basic)) {
+                out.errors.add("OCSP response is not a BasicOCSPResp");
+                return out;
+            }
+
+            // Step 1-2: the responder certificate, and the signature over the
+            // response. Without these the whole response is attacker-supplied.
+            X509CertificateHolder[] holders = basic.getCerts();
+            if (holders == null || holders.length == 0) {
+                out.errors.add("OCSP response carries no responder certificate");
+                return out;
+            }
+            X509Certificate signerCert =
+                    new JcaX509CertificateConverter().getCertificate(holders[0]);
+            if (!basic.isSignatureValid(new JcaContentVerifierProviderBuilder()
+                    .build(signerCert.getPublicKey()))) {
+                out.errors.add("OCSP response signature is not valid");
+                return out;
+            }
+            signerCert.checkValidity();
+
+            // Step 5: the responder must be issued by the same CA as the user
+            // certificate. A valid response from some other CA's responder says
+            // nothing about this certificate.
+            if (!signerCert.getIssuerX500Principal().equals(userCert.getIssuerX500Principal())) {
+                out.errors.add("OCSP signer is not issued by the same CA as the BankID certificate");
+            }
+
+            // Step 3: the actual revocation status.
+            SingleResp match = null;
+            for (SingleResp single : basic.getResponses()) {
                 if (single.getCertID() != null
                         && single.getCertID().getSerialNumber().equals(userCert.getSerialNumber())) {
-                    out.matchesCertificate = true;
-                    if (basic.getProducedAt() != null) {
-                        out.producedAt = basic.getProducedAt().toInstant();
-                    }
-                    return out;
+                    match = single;
+                    break;
                 }
             }
-            log.warn("OCSP response did not contain a SingleResp matching certificate serial {}",
-                    userCert.getSerialNumber());
+            if (match == null) {
+                out.errors.add("OCSP response contains no entry for certificate serial "
+                        + userCert.getSerialNumber());
+                return out;
+            }
+            out.matchesCertificate = true;
+            if (match.getCertStatus() != null) {
+                // BouncyCastle represents GOOD as null; anything else is revoked
+                // or unknown.
+                out.errors.add("Certificate status is not good: " + match.getCertStatus());
+            }
+            if (match.getNextUpdate() != null && match.getNextUpdate().toInstant().isBefore(Instant.now())) {
+                out.errors.add("OCSP response is stale (nextUpdate in the past)");
+            }
+            if (basic.getProducedAt() != null) {
+                out.producedAt = basic.getProducedAt().toInstant();
+            }
+
+            // Step 6: nonce binds this response to this signature.
+            Extension nonceExt = basic.getExtension(OCSPObjectIdentifiers.id_pkix_ocsp_nonce);
+            if (nonceExt == null) {
+                out.errors.add("OCSP response carries no nonce");
+            } else if (signatureBase64 != null) {
+                byte[] nonce = nonceExt.getExtnValue().getOctets();
+                byte[] expected = MessageDigest.getInstance("SHA-1")
+                        .digest(signatureBase64.getBytes(StandardCharsets.UTF_8));
+                if (nonce.length < expected.length
+                        || !MessageDigest.isEqual(
+                                java.util.Arrays.copyOf(nonce, expected.length), expected)) {
+                    out.errors.add("OCSP nonce does not bind to this signature");
+                }
+            }
         } catch (Exception e) {
-            log.warn("OCSP parse failure: {}", e.getMessage());
+            log.warn("OCSP verification failure: {}", e.getMessage());
+            out.errors.add("OCSP verification error: " + e.getMessage());
         }
         return out;
     }
@@ -380,8 +599,22 @@ public class BankIdService {
      * Return the text content of the first element matching {@code tagName},
      * trimmed. Returns {@code null} if no such element exists.
      */
-    private String firstElementText(Document doc, String tagName) {
-        NodeList nl = doc.getElementsByTagName(tagName);
+    /**
+     * The single {@code bankIdSignedData} element, or {@code null} if it is
+     * missing or duplicated. Everything the caller is told about the signature
+     * must be read from inside this element — it is the only part the
+     * signature's Reference covers.
+     */
+    private Element uniqueSignedData(Document doc) {
+        NodeList nodes = doc.getElementsByTagName("bankIdSignedData");
+        if (nodes.getLength() != 1 || !(nodes.item(0) instanceof Element el)) {
+            return null;
+        }
+        return el;
+    }
+
+    private String firstElementText(Element scope, String tagName) {
+        NodeList nl = scope.getElementsByTagName(tagName);
         if (nl.getLength() == 0) {
             return null;
         }
@@ -394,8 +627,8 @@ public class BankIdService {
      * by searching for {@code parentTag} first, then within its descendants for
      * {@code childTag}.
      */
-    private String firstElementText(Document doc, String parentTag, String childTag) {
-        NodeList parents = doc.getElementsByTagName(parentTag);
+    private String firstElementText(Element scope, String parentTag, String childTag) {
+        NodeList parents = scope.getElementsByTagName(parentTag);
         for (int i = 0; i < parents.getLength(); i++) {
             Node parent = parents.item(i);
             if (parent instanceof Element parentElement) {
@@ -482,6 +715,11 @@ public class BankIdService {
     private static class OcspCheck {
         boolean matchesCertificate = false;
         Instant producedAt = null;
+        final List<String> errors = new ArrayList<>();
+
+        boolean ok() {
+            return matchesCertificate && errors.isEmpty();
+        }
     }
 
     @Data
