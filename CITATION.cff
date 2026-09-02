@@ -5,17 +5,18 @@ title: "HSM Attestation Reference Implementation"
 abstract: >-
   Reference implementation for financial entities operating under DORA
   Article 28(1)(a) and 28(6): a Spring Boot client that submits HSM
-  attestation evidence to a supervisory gatekeeper, executes the
-  two-step verify/confirm protocol, and retains the cryptographically
-  signed supervisory authorisation as the audit record. Version 1.3.0 corrects
-  defects found when the implementation was checked against its documentation: cloud-HSM attestation attributes
-  are no longer asserted without being parsed, an empty certificate path
-  no longer counts as a validated chain, BankID chain validation pins
-  the Member Banks roots instead of trusting the caller-supplied chain,
-  and BankID OCSP verification follows all seven steps of BankID's
-  published procedure. Companions: gatekeeper
-  (NCA-operated certificate-issuance gate and settlement-time signature
-  verification) and railgate (central-bank settlement-rail enforcement).
+  attestation evidence to a supervisory gatekeeper, executes the two-step
+  verify/confirm protocol, and retains the cryptographically signed
+  supervisory authorisation as the audit record. Version 1.4.0 closes gaps
+  found in a second review of the code against its documentation: the
+  PKCS#10 request's own signature is now verified (proof of possession),
+  the BankID signature is bound to the specific request it authorises, the
+  OCSP responder certificate is verified against the issuing CA, the
+  Yubico verifier fails closed on a missing capabilities extension, and
+  the receipt wire format moves to v2 in lockstep with gatekeeper 1.4.0.
+  Companions: gatekeeper (NCA-operated certificate-issuance gate and
+  settlement-time signature verification) and railgate (central-bank
+  settlement-rail enforcement).
 version: "1.4.0"
 date-released: "2026-09-02"
 license: MIT
