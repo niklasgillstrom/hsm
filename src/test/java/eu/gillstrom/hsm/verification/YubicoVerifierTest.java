@@ -51,6 +51,29 @@ class YubicoVerifierTest {
     }
 
     @Test
+    void missingCapabilitiesExtensionIsRejected() throws Exception {
+        YubicoVerifier verifier = new YubicoVerifier();
+
+        // A certificate with no Yubico attestation extensions at all — in
+        // particular no capabilities extension (1.3.6.1.4.1.41482.4.5). The
+        // result's exportability flags default to false, which reads as "not
+        // exportable"; an absent attribute must not be treated as a satisfied
+        // attribute.
+        KeyPair rootKp = TestPki.newRsaKeyPair(2048);
+        X509Certificate fakeRoot = TestPki.selfSignedCa(rootKp, "FAKE-YUBICO-ROOT");
+        KeyPair leafKp = TestPki.newRsaKeyPair(2048);
+        X509Certificate attestCert = TestPki.endEntity(
+                leafKp, "FAKE-YUBI-ATTEST", fakeRoot, rootKp.getPrivate());
+
+        YubicoVerifier.YubicoAttestationResult r = verifier.verifyYubicoAttestation(
+                List.of(TestPki.toPem(attestCert), TestPki.toPem(fakeRoot)), leafKp.getPublic());
+
+        assertThat(r.getErrors())
+                .anyMatch(e -> e.contains("Capabilities attestation extension missing"));
+        assertThat(r.isValid()).isFalse();
+    }
+
+    @Test
     void emptyChainIsRejected() {
         YubicoVerifier verifier = new YubicoVerifier();
         YubicoVerifier.YubicoAttestationResult r =

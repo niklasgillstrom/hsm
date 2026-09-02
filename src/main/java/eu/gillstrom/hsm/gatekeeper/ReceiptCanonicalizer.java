@@ -31,7 +31,7 @@ public final class ReceiptCanonicalizer {
     private ReceiptCanonicalizer() {
     }
 
-    public static final String CANONICAL_VERSION = "v1";
+    public static final String CANONICAL_VERSION = "v2";
 
     public static byte[] canonicalize(VerifyResponse r) {
         if (r == null) {
@@ -40,6 +40,7 @@ public final class ReceiptCanonicalizer {
         StringJoiner j = new StringJoiner("|");
         j.add(CANONICAL_VERSION);
         j.add(safe(r.getVerificationId()));
+        j.add(safe(r.getConfirmationNonce()));
         j.add(Boolean.toString(r.isCompliant()));
         j.add(r.getVerificationTimestamp() == null ? "" : r.getVerificationTimestamp().toString());
         j.add(safe(r.getPublicKeyFingerprint()));

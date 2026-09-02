@@ -142,6 +142,7 @@ class GatekeeperFlowTest {
     void receiptCanonicalizerProducesByteIdenticalOutputToGatekeeper() {
         VerifyResponse fixed = VerifyResponse.builder()
                 .verificationId("test-uuid")
+                .confirmationNonce("test-nonce")
                 .compliant(true)
                 .verificationTimestamp(Instant.parse("2026-04-27T00:00:00Z"))
                 .publicKeyFingerprint("aa:bb")
@@ -170,7 +171,7 @@ class GatekeeperFlowTest {
                         .build())
                 .build();
 
-        String expected = "v1|test-uuid|true|2026-04-27T00:00:00Z|aa:bb|RSA|YUBICO|YubiHSM 2|"
+        String expected = "v2|test-uuid|test-nonce|true|2026-04-27T00:00:00Z|aa:bb|RSA|YUBICO|YubiHSM 2|"
                 + "20783176|5569743098|Test|signing|SE|true|true|true|true|true|true|true|true|true|true";
         byte[] expectedBytes = expected.getBytes(StandardCharsets.UTF_8);
         byte[] actualBytes = ReceiptCanonicalizer.canonicalize(fixed);

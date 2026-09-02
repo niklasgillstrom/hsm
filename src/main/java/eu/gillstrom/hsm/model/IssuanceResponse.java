@@ -46,13 +46,30 @@ public class IssuanceResponse {
          * under any trusted gatekeeper key in the local registry.
          */
         REJECTED_GATEKEEPER_RECEIPT_INVALID,
+        /**
+         * Gatekeeper verify returned an authentic receipt, but the public key
+         * it approved is not the public key in this request's CSR. An authentic
+         * receipt for some other key is not an authorisation for this one.
+         */
+        REJECTED_RECEIPT_KEY_MISMATCH,
         /** Issuance step failed after a successful gatekeeper verify. */
         REJECTED_ISSUANCE_FAILED,
         /**
          * Anomalous: certificate was issued but the gatekeeper confirm call
          * failed. The supervisory loop is open. Operators must follow up.
          */
-        ISSUED_BUT_GATEKEEPER_CONFIRM_FAILED
+        ISSUED_BUT_GATEKEEPER_CONFIRM_FAILED,
+        /**
+         * Anomalous: certificate was issued and the gatekeeper answered the
+         * confirm call, but the answer does not close the loop — a mismatched
+         * {@code verificationId}, {@code loopClosed=false}, or an approval
+         * registry that ended in a state other than
+         * {@code VERIFIED_AND_ISSUED}. Distinguished from
+         * {@link #ISSUED_BUT_GATEKEEPER_CONFIRM_FAILED} because here the
+         * gatekeeper did respond: the supervisory record contradicts the
+         * issuance rather than being absent.
+         */
+        ISSUED_BUT_CONFIRM_NOT_CLOSED
     }
 
     private Stage stage;
@@ -113,6 +130,17 @@ public class IssuanceResponse {
                 .build();
     }
 
+    public static IssuanceResponse rejectedReceiptKeyMismatch(VerificationResponse v,
+            VerifyResponse receipt, String reason) {
+        return IssuanceResponse.builder()
+                .stage(Stage.REJECTED_RECEIPT_KEY_MISMATCH)
+                .issued(false)
+                .verification(v)
+                .verifyReceipt(VerifyResponseSummary.from(receipt))
+                .errors(List.of(reason))
+                .build();
+    }
+
     public static IssuanceResponse rejectedIssuance(VerificationResponse v,
             VerifyResponse receipt, String reason) {
         return IssuanceResponse.builder()
@@ -135,6 +163,23 @@ public class IssuanceResponse {
                 .errors(List.of(
                         "Certificate issued but gatekeeper confirm call failed: " + reason
                                 + ". The supervisory loop is open; follow up with the operating NCA."))
+                .build();
+    }
+
+    public static IssuanceResponse issuedButConfirmNotClosed(VerificationResponse v,
+            VerifyResponse receipt, IssuedCertificate cert,
+            IssuanceConfirmResponse confirm, String reason) {
+        return IssuanceResponse.builder()
+                .stage(Stage.ISSUED_BUT_CONFIRM_NOT_CLOSED)
+                .issued(true)
+                .verification(v)
+                .verifyReceipt(VerifyResponseSummary.from(receipt))
+                .confirmResponse(IssuanceConfirmResponseSummary.from(confirm))
+                .certificate(IssuedCertificateSummary.from(cert))
+                .errors(List.of(
+                        "Certificate issued but the gatekeeper confirm did not close the "
+                                + "supervisory loop: " + reason
+                                + ". Treat as an anomaly; follow up with the operating NCA."))
                 .build();
     }
 

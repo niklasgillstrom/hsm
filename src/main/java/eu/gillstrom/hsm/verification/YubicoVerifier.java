@@ -236,7 +236,21 @@ public class YubicoVerifier implements HsmAttestationVerifier {
 
     private void extractYubicoAttributes(X509Certificate cert, YubicoAttestationResult result) {
         try {
-            for (String oid : cert.getNonCriticalExtensionOIDs()) {
+            // Read both critical and non-critical extension OIDs. Yubico ships
+            // the attestation extensions as non-critical, but a certificate
+            // that marks them critical would previously have been skipped
+            // entirely — and a skipped capabilities extension left
+            // exportability reported as "not exportable" without anything
+            // having been parsed.
+            java.util.Set<String> oids = new java.util.LinkedHashSet<>();
+            if (cert.getCriticalExtensionOIDs() != null) {
+                oids.addAll(cert.getCriticalExtensionOIDs());
+            }
+            if (cert.getNonCriticalExtensionOIDs() != null) {
+                oids.addAll(cert.getNonCriticalExtensionOIDs());
+            }
+            boolean capabilitiesSeen = false;
+            for (String oid : oids) {
                 byte[] extValue = cert.getExtensionValue(oid);
                 if (extValue == null)
                     continue;
@@ -268,9 +282,30 @@ public class YubicoVerifier implements HsmAttestationVerifier {
                         }
                     }
                     case CAPABILITIES_OID -> {
+                        capabilitiesSeen = true;
                         ASN1BitString bs = ASN1BitString.getInstance(content);
                         byte[] capBytes = bs.getBytes();
                         long caps = 0;
+                        // TODO(v1.4.0, open question): byte order. This folds
+                        // the capability bit string little-endian — capBytes[0]
+                        // supplies bits 0-7. Yubico's YubiHSM 2 attestation
+                        // documentation
+                        // (https://developers.yubico.com/YubiHSM2/Concepts/Attestation.html
+                        // and the capability table under
+                        // https://developers.yubico.com/YubiHSM2/Concepts/Capability.html)
+                        // does not state the encoding of extension
+                        // 1.3.6.1.4.1.41482.4.5 unambiguously, and an ASN.1 BIT
+                        // STRING is conventionally read most-significant-bit
+                        // first, which would put EXPORT_WRAPPED and
+                        // EXPORTABLE_UNDER_WRAP at different offsets. The
+                        // interpretation is deliberately left unchanged in
+                        // v1.4.0 rather than swapped on a guess: changing it
+                        // without a documented ground truth would trade one
+                        // unverified reading for another. Resolve against
+                        // Yubico's specification (or a device-produced
+                        // attestation with known capabilities set) before
+                        // relying on the exportability flags for a production
+                        // compliance decision.
                         for (int i = 0; i < Math.min(capBytes.length, 8); i++) {
                             caps |= ((long) (capBytes[i] & 0xFF)) << (8 * i);
                         }
@@ -288,6 +323,16 @@ public class YubicoVerifier implements HsmAttestationVerifier {
                         result.setKeyId(objId.getValue().intValue());
                     }
                 }
+            }
+
+            // Fail closed on a missing capabilities extension. Without it,
+            // nothing has been parsed about exportability, yet the result's
+            // flags default to false — which reads downstream as "key cannot
+            // be exported". An absent attestation attribute is not evidence
+            // that the attribute is satisfied.
+            if (!capabilitiesSeen) {
+                result.addError("YUBICO_CAPABILITIES_MISSING: Capabilities attestation extension missing ("
+                        + CAPABILITIES_OID + ") — key exportability is unverified");
             }
 
             // Validate key origin and exportability

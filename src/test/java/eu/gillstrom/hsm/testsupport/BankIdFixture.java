@@ -96,6 +96,18 @@ public final class BankIdFixture {
     public final KeyPair foreignOcspKp;
     public final X509Certificate foreignOcspCert;
 
+    /**
+     * A responder certificate that carries the bank CA's DN in its issuer field
+     * but is signed by its own key. Passes an issuer-DN string comparison and
+     * fails a cryptographic one.
+     */
+    public final KeyPair rogueOcspKp;
+    public final X509Certificate rogueOcspCert;
+
+    /** A responder issued by the right CA but without EKU id-kp-OCSPSigning. */
+    public final KeyPair noEkuOcspKp;
+    public final X509Certificate noEkuOcspCert;
+
     public BankIdFixture() throws Exception {
         rootKp = TestPki.newRsaKeyPair(2048);
         rootCert = TestPki.selfSignedCa(rootKp, "Test BankID Fixture Root");
@@ -108,14 +120,25 @@ public final class BankIdFixture {
         personCert = person(personKp, bankCaCert, bankCaKp.getPrivate());
 
         ocspKp = TestPki.newRsaKeyPair(2048);
-        ocspCert = TestPki.endEntity(ocspKp, "Test Bank CA v1 for BankID OCSP Signing",
+        ocspCert = TestPki.ocspResponder(ocspKp, "Test Bank CA v1 for BankID OCSP Signing",
                 bankCaCert, bankCaKp.getPrivate());
 
         foreignCaKp = TestPki.newRsaKeyPair(2048);
         foreignCaCert = TestPki.selfSignedCa(foreignCaKp, "Unrelated CA");
         foreignOcspKp = TestPki.newRsaKeyPair(2048);
-        foreignOcspCert = TestPki.endEntity(foreignOcspKp, "Unrelated OCSP Signing",
+        foreignOcspCert = TestPki.ocspResponder(foreignOcspKp, "Unrelated OCSP Signing",
                 foreignCaCert, foreignCaKp.getPrivate());
+
+        // Self-issued, but wearing the bank CA's issuer DN. Everything an
+        // issuer-DN string comparison looks at matches.
+        rogueOcspKp = TestPki.newRsaKeyPair(2048);
+        rogueOcspCert = TestPki.ocspResponder(rogueOcspKp, "Test Bank CA v1 for BankID OCSP Signing",
+                new X500Name(bankCaCert.getSubjectX500Principal().getName()),
+                rogueOcspKp.getPrivate());
+
+        noEkuOcspKp = TestPki.newRsaKeyPair(2048);
+        noEkuOcspCert = TestPki.endEntity(noEkuOcspKp, "Test Bank CA v1 for BankID No EKU",
+                bankCaCert, bankCaKp.getPrivate());
     }
 
     /** The anchor set to hand to the package-private BankIdService constructor. */
@@ -142,9 +165,21 @@ public final class BankIdFixture {
     // Signature
     // ------------------------------------------------------------------
 
+    /** Default usrNonVisibleData payload when a test does not bind a request. */
+    public static final String DEFAULT_NON_VISIBLE = "dold nyttolast";
+
     /** A signed BankID response, base64-encoded exactly as the API returns it. */
     public String signedResponseBase64(String visibleText) throws Exception {
         return signedResponseBase64(visibleText, false, false);
+    }
+
+    /**
+     * A signed BankID response carrying a specific {@code usrNonVisibleData}
+     * payload — used to exercise the canonical request binding produced by
+     * {@code BankIdService.expectedBinding(...)}.
+     */
+    public String signedResponseBoundTo(String visibleText, String nonVisibleData) throws Exception {
+        return signedResponseBase64(visibleText, false, false, nonVisibleData);
     }
 
     /**
@@ -155,11 +190,18 @@ public final class BankIdFixture {
     public String signedResponseBase64(String visibleText,
                                        boolean injectOutside,
                                        boolean duplicateData) throws Exception {
+        return signedResponseBase64(visibleText, injectOutside, duplicateData, DEFAULT_NON_VISIBLE);
+    }
+
+    public String signedResponseBase64(String visibleText,
+                                       boolean injectOutside,
+                                       boolean duplicateData,
+                                       String nonVisibleData) throws Exception {
         DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
         dbf.setNamespaceAware(true);
         Document doc = dbf.newDocumentBuilder().newDocument();
 
-        Element signedData = signedDataElement(doc, visibleText, "bidSignedData");
+        Element signedData = signedDataElement(doc, visibleText, "bidSignedData", nonVisibleData);
         signedData.setIdAttribute("Id", true);
 
         XMLSignatureFactory fac = XMLSignatureFactory.getInstance("DOM");
@@ -210,7 +252,8 @@ public final class BankIdFixture {
         }
         if (duplicateData) {
             Element decoyObject = doc.createElementNS(XMLSignature.XMLNS, "Object");
-            decoyObject.appendChild(signedDataElement(doc, "ANNAN TEXT", "otherSignedData"));
+            decoyObject.appendChild(signedDataElement(doc, "ANNAN TEXT", "otherSignedData",
+                    DEFAULT_NON_VISIBLE));
             doc.getDocumentElement().appendChild(decoyObject);
         }
         byte[] xml = serialise(doc);
@@ -265,7 +308,8 @@ public final class BankIdFixture {
         }
     }
 
-    private Element signedDataElement(Document doc, String visibleText, String id) {
+    private Element signedDataElement(Document doc, String visibleText, String id,
+                                      String nonVisibleData) {
         Element sd = doc.createElementNS(BANKID_NS, "bankIdSignedData");
         // createElementNS sets the namespace URI but adds no xmlns attribute
         // node. Java's c14n builds namespace declarations from attribute nodes,
@@ -279,7 +323,7 @@ public final class BankIdFixture {
         vis.setTextContent(b64(visibleText));
         sd.appendChild(vis);
         Element nonVis = doc.createElementNS(BANKID_NS, "usrNonVisibleData");
-        nonVis.setTextContent(b64("dold nyttolast"));
+        nonVis.setTextContent(b64(nonVisibleData));
         sd.appendChild(nonVis);
         Element srv = doc.createElementNS(BANKID_NS, "srvInfo");
         Element name = doc.createElementNS(BANKID_NS, "name");
@@ -326,6 +370,23 @@ public final class BankIdFixture {
     public String ocspForeignIssuer(String signatureBase64) throws Exception {
         return ocspResponse(signatureBase64, CertificateStatus.GOOD, foreignOcspCert,
                 foreignOcspKp.getPrivate(), true);
+    }
+
+    /**
+     * Response signed by a self-issued responder certificate whose issuer DN is
+     * a copy of the bank CA's. The response signature verifies under the
+     * responder certificate, and the issuer DN comparison passes — only a
+     * cryptographic check against the real issuing CA's public key rejects it.
+     */
+    public String ocspSelfIssuedResponder(String signatureBase64) throws Exception {
+        return ocspResponse(signatureBase64, CertificateStatus.GOOD, rogueOcspCert,
+                rogueOcspKp.getPrivate(), true);
+    }
+
+    /** Responder issued by the correct CA but lacking EKU id-kp-OCSPSigning. */
+    public String ocspResponderWithoutEku(String signatureBase64) throws Exception {
+        return ocspResponse(signatureBase64, CertificateStatus.GOOD, noEkuOcspCert,
+                noEkuOcspKp.getPrivate(), true);
     }
 
     public String ocspWithoutNonce(String signatureBase64) throws Exception {

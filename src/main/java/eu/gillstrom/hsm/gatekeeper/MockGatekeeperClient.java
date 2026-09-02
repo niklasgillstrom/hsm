@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+import eu.gillstrom.hsm.util.Fingerprints;
 
 import java.io.StringWriter;
 import java.math.BigInteger;
@@ -296,13 +297,18 @@ public class MockGatekeeperClient implements GatekeeperClient {
         byte[] der = Base64.getDecoder().decode(body);
         var spec = new java.security.spec.X509EncodedKeySpec(der);
         PublicKey pk = java.security.KeyFactory.getInstance("RSA").generatePublic(spec);
-        return GatekeeperKeyRegistry.fingerprintHex(pk);
+        // Canonical wire format (lowercase colon-hex), the same format a real
+        // gatekeeper puts in VerifyResponse.publicKeyFingerprint. The
+        // colon-free GatekeeperKeyRegistry.fingerprintHex format is a local
+        // registry key only; emitting it here would make the mock produce a
+        // receipt that the financial entity's own key-binding check rejects.
+        return Fingerprints.ofPublicKey(pk);
     }
 
     private static String fingerprintOfCertificatePublicKey(String pem) throws Exception {
         var cf = java.security.cert.CertificateFactory.getInstance("X.509");
         X509Certificate cert = (X509Certificate) cf.generateCertificate(
                 new java.io.ByteArrayInputStream(pem.getBytes()));
-        return GatekeeperKeyRegistry.fingerprintHex(cert.getPublicKey());
+        return Fingerprints.ofPublicKey(cert.getPublicKey());
     }
 }

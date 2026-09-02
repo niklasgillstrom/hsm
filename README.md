@@ -43,7 +43,7 @@ The companion repository `gatekeeper` carries the supervisory side and includes 
 ### POST /api/v1/attestation/verify
 
 **Request:**
-Use bankIdOcspResponse to verify signing time and add it to `bankIdSignatureTime` in the output. The `certificateType` field is server-enforced: a `SIGNING` request is rejected if it does not carry attestation evidence; a `TRANSPORT` request is rejected if it does.
+`bankIdOcspResponse` is **required** (since 1.4.0) — it supplies the certificate's revocation status at authorisation time and its `producedAt` becomes `bankIdSignatureTime` in the output. The BankID signature must additionally carry the canonical request binding in `usrNonVisibleData`; see "BankID request binding" below. The `certificateType` field is server-enforced: a `SIGNING` request is rejected if it does not carry attestation evidence; a `TRANSPORT` request is rejected if it does.
 ```json
 {
   "csr": "-----BEGIN CERTIFICATE REQUEST-----\nMIIE...",
@@ -147,8 +147,10 @@ Phase 2 — Gatekeeper.verify (GatekeeperClient.verify, supervisory cross-check)
       │   Gatekeeper independently re-runs PKIX + attestation checks
       │   Gatekeeper signs the canonical bytes of VerifyResponse with its NCA key
       │   ReceiptVerifier checks signature against GatekeeperKeyRegistry
+      │   Receipt's publicKeyFingerprint compared against the CSR's public key
       │
       ├─ non-compliant or signature invalid → stage=GATEKEEPER_REJECTED, no issuance
+      ├─ receipt approves a different key → stage=REJECTED_RECEIPT_KEY_MISMATCH
       │
       ▼
 Phase 3 — Issuance (IssuanceClient.issue, certificate produced)
@@ -169,6 +171,10 @@ Phase 4 — Gatekeeper.confirm (GatekeeperClient.confirm, supervisory closure)
       │   (anomalous state — the certificate exists but the registry could not be
       │    closed; flagged for supervisory review, the certificate must be revoked
       │    unless the failure is shown to be transport-level only)
+      ├─ confirm answered but does not close the loop (foreign verificationId,
+      │   loopClosed=false, or a registryStatus other than VERIFIED_AND_ISSUED)
+      │   → stage=ISSUED_BUT_CONFIRM_NOT_CLOSED (equally anomalous: here the
+      │    supervisory record actively contradicts the issuance)
       │
       ▼
 IssuanceResponse { stage, issued, verification, verifyReceipt, certificate, confirmResponse, errors }
@@ -208,9 +214,10 @@ The verification pipeline mixes two regulatory regimes that the reader should ke
 
 Numbered pipeline:
 
-1. **CSR**: Parse PKCS#10 via BouncyCastle and extract the public key.
+1. **CSR**: Parse PKCS#10 via BouncyCastle, **verify the CSR's own signature** under the public key it carries (proof of possession — a failure ends the request with `CSR_SIGNATURE_INVALID`), and extract the public key.
 2. **BankID XML-DSig** *(integration-side, not DORA-mandated)*: Parse the BankID signature response with XXE-protected `DocumentBuilder`, verify the enveloping XML-DSig signature against the user certificate's public key (`javax.xml.crypto.dsig.XMLSignatureFactory`, DOM provider), and validate the certificate chain with PKIX `CertPathValidator`. The signature verification is what proves that `usrVisibleData` / `usrNonVisibleData` came from the BankID holder rather than being attacker-grafted onto a legitimate certificate chain. Required because Swish uses BankID for signatory authentication, not by DORA.
-3. **OCSP (optional)** *(integration-side)*: If an OCSP response is supplied, parse it via BouncyCastle's `OCSPResp` / `BasicOCSPResp` / `SingleResp`, confirm that the `CertID.SerialNumber` matches the user certificate's serial, and read `producedAt` as the authoritative signing time.
+   The signed payload must also **bind the signature to this request** — see "BankID request binding" below (`BANKID_NOT_BOUND_TO_REQUEST`).
+3. **OCSP (mandatory)** *(integration-side)*: Parse the OCSP response via BouncyCastle's `OCSPResp` / `BasicOCSPResp` / `SingleResp`, verify the response signature, verify the responder certificate under the public key of the CA that issued the user certificate (taken from the PKIX-validated path) and require Extended Key Usage `id-kp-OCSPSigning` (1.3.6.1.5.5.7.3.9) and a current validity period, check `CertStatus` and the nonce binding, confirm that the `CertID.SerialNumber` matches the user certificate's serial, and read `producedAt` as the authoritative signing time. **`bankIdOcspResponse` is required** (`@NotBlank`): PKIX validation of the BankID chain runs with revocation checking disabled, so this response is the only evidence of the certificate's status at authorisation time. A request without it is rejected with `BANKID_OCSP_REQUIRED`.
 4. **Signatory rights** *(integration-side)*: The pluggable `SignatoryRightsVerifier` checks whether the BankID-identified person is authorised to act as a signatory for the requested `organisationNumber` / `swishNumber`. Reference defaults:
    - `swish.signatory-rights.mode=fail-closed` — returns `UNKNOWN` for every query and logs `WARN`; SIGNING requests fail.
    - `swish.signatory-rights.mode=mock-registry` — loads `(personalNumber, organisationNumber)` pairs from `classpath:signatory-rights.json` to demonstrate the integration shape; not authoritative.
@@ -222,6 +229,22 @@ Numbered pipeline:
    - Verify key attributes: `generatedOnDevice=true`, `exportable=false`.
 6. **Server-enforced certificate type** *(DORA-mandated)*: SIGNING requests that do not carry attestation evidence are rejected. TRANSPORT requests that do carry attestation data are rejected as ambiguous.
 7. **Issue certificate**: The Swish CA issues a transport or signing certificate matching the validated request type.
+
+### BankID request binding
+
+A BankID signature proves that a person signed *something*. To make it prove that they authorised *this* certificate request, the relying party puts a canonical binding string in `usrNonVisibleData` when creating the BankID sign order. BankID returns it inside the signed `bankIdSignedData` element, so it is covered by the XML-DSig Reference and cannot be substituted after signing.
+
+The string, exactly (single line, no padding, no trailing separator):
+
+```
+hsm-csr:v1;org=<organisationNumber>;swish=<swishNumber>;csr-sha256=<lowercase hex SHA-256 over the CSR's DER encoding>
+```
+
+- `<organisationNumber>` and `<swishNumber>` are the values sent in the same request, verbatim.
+- `<csr-sha256>` is SHA-256 over the **DER** encoding of the PKCS#10 request — the bytes inside the PEM armour, not the base64 text and not the PEM string. With OpenSSL: `openssl req -in request.csr -outform DER | sha256sum`.
+- The string is UTF-8 encoded and base64 encoded once, into the BankID sign order's `userNonVisibleData` parameter. It comes back base64-encoded in the `usrNonVisibleData` element of the signature XML; `BankIdService` decodes that layer and compares the resulting string.
+
+`AttestationService` recomputes the string from the request in hand and requires byte equality (`MessageDigest.isEqual`). A missing `usrNonVisibleData`, or one belonging to a different organisation number, Swish number or CSR, is rejected with `BANKID_NOT_BOUND_TO_REQUEST`. Without this check, a signature legitimately collected for one request can be replayed with another request's CSR: the signature verifies, the personal number is genuine, and nothing else in the payload contradicts the swap.
 
 Steps 2–4 reflect Swish's current operational integration (BankID for signatory authentication; signatory-rights look-up against an out-of-band registry); if Swish ever switches eID provider, only steps 2–4 change. Steps 5–6 are fixed by DORA and cannot be substituted regardless of any integration-side change.
 
@@ -350,12 +373,17 @@ vmware.vscode-boot-dev-pack
 
 ```bash
 mvn clean package
-java -jar target/hsm-1.0.0.jar
+java -jar target/hsm-1.4.0.jar
 ```
 
-**Swagger UI:**
-http://localhost:8080/swagger-ui.html
-http://localhost:8080/swagger-ui/index.html
+**Swagger UI** is off in every profile except `dev` (`application-dev.yaml`); the
+OpenAPI document and the UI have no run-time function and are kept out of the
+deployed surface. Locally:
+
+```bash
+java -jar target/hsm-1.4.0.jar --spring.profiles.active=dev
+# http://localhost:8080/swagger-ui.html   http://localhost:8080/v3/api-docs
+```
 
 ## Production
 

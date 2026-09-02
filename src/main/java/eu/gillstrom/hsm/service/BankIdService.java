@@ -39,6 +39,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 
@@ -149,6 +150,13 @@ public class BankIdService {
             -----END CERTIFICATE-----
             """;
 
+    /**
+     * Extended Key Usage OID {@code id-kp-OCSPSigning} (RFC 6960 §4.2.2.2).
+     * A responder certificate without it is not authorised by its CA to sign
+     * OCSP responses on the CA's behalf.
+     */
+    private static final String OCSP_SIGNING_EKU_OID = "1.3.6.1.5.5.7.3.9";
+
     private final Set<TrustAnchor> bankIdTrustAnchors;
 
     public BankIdService() {
@@ -181,6 +189,74 @@ public class BankIdService {
                 new ByteArrayInputStream(pem.trim().getBytes(StandardCharsets.UTF_8)));
     }
 
+    // ------------------------------------------------------------------
+    // Request binding
+    // ------------------------------------------------------------------
+
+    /**
+     * Version marker of the canonical request-binding format carried in
+     * {@code usrNonVisibleData}. Bump this if the field set or the separator
+     * ever changes; a relying party that does not understand the version must
+     * reject the signature rather than guess.
+     */
+    public static final String BINDING_VERSION = "hsm-csr:v1";
+
+    /**
+     * The canonical string that the BankID signature's {@code usrNonVisibleData}
+     * must carry, so that the authorisation act is bound to <em>this</em>
+     * certificate request and not merely to some request.
+     *
+     * <p>Format (single line, no padding, no trailing separator):</p>
+     *
+     * <pre>hsm-csr:v1;org=&lt;organisationNumber&gt;;swish=&lt;swishNumber&gt;;csr-sha256=&lt;hex&gt;</pre>
+     *
+     * <p>where {@code hex} is lowercase hex of SHA-256 over the CSR's DER
+     * encoding (the bytes inside the PEM armour, not the base64 text). The
+     * relying party sends this string, UTF-8 encoded and then base64 encoded,
+     * as {@code usrNonVisibleData} in the BankID sign order; BankID returns it
+     * base64-encoded inside the signed {@code bankIdSignedData} element, so it
+     * is covered by the XML-DSig Reference and cannot be substituted after the
+     * fact.</p>
+     *
+     * <p>Without this binding a BankID signature legitimately collected for one
+     * certificate request can be replayed against another request carrying a
+     * different CSR — the signature verifies, the personal number is genuine,
+     * and nothing in the payload contradicts the swap.</p>
+     */
+    public static String expectedBinding(String organisationNumber, String swishNumber, byte[] csrDer) {
+        if (csrDer == null) {
+            throw new IllegalArgumentException("csrDer must not be null");
+        }
+        return BINDING_VERSION
+                + ";org=" + (organisationNumber == null ? "" : organisationNumber)
+                + ";swish=" + (swishNumber == null ? "" : swishNumber)
+                + ";csr-sha256=" + csrSha256Hex(csrDer);
+    }
+
+    /** Lowercase hex of SHA-256 over the CSR's DER encoding. */
+    public static String csrSha256Hex(byte[] csrDer) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(csrDer));
+        } catch (Exception e) {
+            // SHA-256 is JCA-mandatory; unreachable in practice.
+            throw new IllegalStateException("SHA-256 unavailable on this JVM", e);
+        }
+    }
+
+    /**
+     * Constant-time comparison of the decoded {@code usrNonVisibleData} against
+     * the expected binding string. A missing or blank {@code usrNonVisibleData}
+     * is never a match — fail-closed.
+     */
+    public static boolean isBoundToRequest(String usrNonVisibleData, String expectedBinding) {
+        if (usrNonVisibleData == null || usrNonVisibleData.isBlank() || expectedBinding == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                usrNonVisibleData.trim().getBytes(StandardCharsets.UTF_8),
+                expectedBinding.getBytes(StandardCharsets.UTF_8));
+    }
+
     /**
      * Verify a BankID signature response.
      *
@@ -199,11 +275,22 @@ public class BankIdService {
      *       here (consistent with the chosen validation model); higher layers
      *       should rely on the OCSP response cross-check (step&nbsp;4) for
      *       certificate-status information.</li>
-     *   <li>If an OCSP response is supplied, parse it with BouncyCastle, verify
-     *       that it refers to the same user-certificate serial, and extract
-     *       {@code producedAt} as the authoritative signing time.</li>
+     *   <li>Parse the OCSP response with BouncyCastle, verify its signature and
+     *       the responder's authority (issued by the same CA as the user
+     *       certificate, verified under that CA's public key, carrying EKU
+     *       {@code id-kp-OCSPSigning}, and within its validity period), check
+     *       the certificate status and the nonce binding, and extract
+     *       {@code producedAt} as the authoritative signing time. The OCSP
+     *       response is <b>mandatory</b>: without it the method returns
+     *       {@code valid=false} with {@code BANKID_OCSP_REQUIRED}.</li>
      *   <li>Extract identity data from the signed payload.</li>
      * </ol>
+     *
+     * <p>Callers that need the authorisation act bound to a specific
+     * certificate request must additionally compare
+     * {@link BankIdResult#getUsrNonVisibleData()} against
+     * {@link #expectedBinding(String, String, byte[])}; this method verifies
+     * that the payload was signed, not what the payload says.</p>
      */
     public BankIdResult verify(String signatureBase64, String ocspBase64) {
         try {
@@ -226,18 +313,25 @@ public class BankIdService {
 
             // Verify the certificate chain cryptographically using PKIX.
             List<String> chainErrors = new ArrayList<>();
-            boolean chainValid = verifyCertificateChain(certs, chainErrors);
+            ChainCheck chain = verifyCertificateChain(certs, chainErrors);
+            boolean chainValid = chain.valid();
 
-            // Optional OCSP cross-check for signing time and status.
-            Instant producedAt = null;
-            if (ocspBase64 != null && !ocspBase64.isBlank()) {
-                OcspCheck ocsp = checkOcsp(ocspBase64, userCert, signatureBase64);
-                if (!ocsp.ok()) {
-                    return BankIdResult.invalid("OCSP verification failed: "
-                            + String.join("; ", ocsp.errors));
-                }
-                producedAt = ocsp.producedAt;
+            // Mandatory OCSP cross-check for status, responder authority and
+            // signing time. An absent OCSP response is a rejection, not a
+            // downgrade to "signature only": without it the certificate's
+            // revocation status at authorisation time is unknown, and PKIX
+            // runs here with revocation checking disabled.
+            if (ocspBase64 == null || ocspBase64.isBlank()) {
+                return BankIdResult.invalid("BANKID_OCSP_REQUIRED: no OCSP response supplied — "
+                        + "an OCSP response is mandatory for BankID verification");
             }
+            OcspCheck ocsp = checkOcsp(ocspBase64, userCert, signatureBase64,
+                    chain.issuerOf(userCert));
+            if (!ocsp.ok()) {
+                return BankIdResult.invalid("OCSP verification failed: "
+                        + String.join("; ", ocsp.errors));
+            }
+            Instant producedAt = ocsp.producedAt;
 
             String subjectDn = userCert.getSubjectX500Principal().getName();
             String personalNumber = extractDnField(subjectDn, "SERIALNUMBER");
@@ -446,11 +540,16 @@ public class BankIdService {
      * itself must be separately trusted by the caller. In practice BankID chains
      * should terminate in "Finansiell ID-Teknik BID AB" or equivalent — the
      * caller may want to pin that root explicitly.</p>
+     *
+     * <p>Returns the validated path as well as the verdict: the OCSP step needs
+     * the CA certificate that issued the user certificate in order to verify the
+     * responder certificate, and that certificate must come from the path PKIX
+     * actually validated — not from an unvalidated caller-supplied list.</p>
      */
-    private boolean verifyCertificateChain(List<X509Certificate> certs, List<String> errors) {
+    private ChainCheck verifyCertificateChain(List<X509Certificate> certs, List<String> errors) {
         if (certs.isEmpty()) {
             errors.add("Empty certificate chain");
-            return false;
+            return ChainCheck.failed();
         }
         try {
             CertificateFactory cf = CertificateFactory.getInstance("X.509");
@@ -468,16 +567,53 @@ public class BankIdService {
             }
             if (path.isEmpty()) {
                 errors.add("Certificate chain contains no certificate below a pinned BankID root");
-                return false;
+                return ChainCheck.failed();
             }
             PKIXParameters params = new PKIXParameters(bankIdTrustAnchors);
             params.setRevocationEnabled(false);
             CertPathValidator validator = CertPathValidator.getInstance("PKIX");
             validator.validate(cf.generateCertPath(path), params);
-            return true;
+            List<X509Certificate> validated = new ArrayList<>(path);
+            for (TrustAnchor anchor : bankIdTrustAnchors) {
+                if (anchor.getTrustedCert() != null) {
+                    validated.add(anchor.getTrustedCert());
+                }
+            }
+            return ChainCheck.validated(validated);
         } catch (Exception e) {
             errors.add("Chain validation error: " + e.getMessage());
-            return false;
+            return ChainCheck.failed();
+        }
+    }
+
+    /**
+     * Outcome of PKIX validation: the verdict plus the certificates that took
+     * part in the validated path (the submitted path and the pinned anchors).
+     * {@link #issuerOf(X509Certificate)} returns {@code null} when the chain did
+     * not validate, so a caller that needs the issuing CA cannot accidentally
+     * obtain it from an unvalidated chain.
+     */
+    private record ChainCheck(boolean valid, List<X509Certificate> validatedPath) {
+
+        static ChainCheck failed() {
+            return new ChainCheck(false, Collections.emptyList());
+        }
+
+        static ChainCheck validated(List<X509Certificate> path) {
+            return new ChainCheck(true, List.copyOf(path));
+        }
+
+        X509Certificate issuerOf(X509Certificate cert) {
+            if (!valid || cert == null) {
+                return null;
+            }
+            for (X509Certificate candidate : validatedPath) {
+                if (candidate.getSubjectX500Principal().equals(cert.getIssuerX500Principal())
+                        && !candidate.equals(cert)) {
+                    return candidate;
+                }
+            }
+            return null;
         }
     }
 
@@ -510,8 +646,18 @@ public class BankIdService {
      * first 20 are compared. That is sufficient for the property the step
      * exists to establish: a response issued for a different signature is
      * rejected.</p>
+     *
+     * <p><b>Responder authority.</b> Matching the responder's issuer DN against
+     * the user certificate's issuer DN is not sufficient on its own: a DN is
+     * attacker-choosable, so a self-issued responder certificate carrying a
+     * copied issuer DN passes a string comparison. The responder certificate is
+     * therefore also verified cryptographically under the public key of the CA
+     * that issued the user certificate — taken from the PKIX-validated path —
+     * required to carry Extended Key Usage {@code id-kp-OCSPSigning}
+     * (1.3.6.1.5.5.7.3.9), and checked for validity.</p>
      */
-    private OcspCheck checkOcsp(String ocspBase64, X509Certificate userCert, String signatureBase64) {
+    private OcspCheck checkOcsp(String ocspBase64, X509Certificate userCert, String signatureBase64,
+            X509Certificate issuingCa) {
         OcspCheck out = new OcspCheck();
         try {
             OCSPResp resp = new OCSPResp(Base64.getDecoder().decode(ocspBase64));
@@ -545,6 +691,27 @@ public class BankIdService {
             // nothing about this certificate.
             if (!signerCert.getIssuerX500Principal().equals(userCert.getIssuerX500Principal())) {
                 out.errors.add("OCSP signer is not issued by the same CA as the BankID certificate");
+            }
+
+            // Step 5 (cryptographic part): the responder certificate must
+            // actually be signed by that CA, and must be entitled to sign OCSP
+            // responses. A copied issuer DN alone proves nothing.
+            if (issuingCa == null) {
+                out.errors.add("OCSP_RESPONDER_CHAIN_INVALID: the CA that issued the BankID "
+                        + "certificate could not be resolved from a PKIX-validated chain, so the "
+                        + "OCSP responder certificate cannot be verified");
+            } else {
+                try {
+                    signerCert.verify(issuingCa.getPublicKey());
+                } catch (Exception e) {
+                    out.errors.add("OCSP_RESPONDER_NOT_ISSUED_BY_CA: responder certificate is not "
+                            + "signed by the CA that issued the BankID certificate: " + e.getMessage());
+                }
+            }
+            List<String> eku = signerCert.getExtendedKeyUsage();
+            if (eku == null || !eku.contains(OCSP_SIGNING_EKU_OID)) {
+                out.errors.add("OCSP_RESPONDER_EKU_MISSING: responder certificate does not carry "
+                        + "Extended Key Usage id-kp-OCSPSigning (" + OCSP_SIGNING_EKU_OID + ")");
             }
 
             // Step 3: the actual revocation status.
@@ -692,7 +859,11 @@ public class BankIdService {
             }
             return null;
         } catch (InvalidNameException e) {
-            log.warn("Failed to parse DN '{}': {}", dn, e.getMessage());
+            // Never log the DN itself: a BankID subject DN carries the
+            // signatory's personal identity number in SERIALNUMBER and their
+            // name in CN. The parse failure message is enough to diagnose a
+            // malformed DN without writing personal data to the log.
+            log.warn("Failed to parse a distinguished name (field={}): {}", field, e.getMessage());
             return null;
         }
     }

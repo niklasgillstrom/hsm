@@ -1,6 +1,8 @@
 package eu.gillstrom.hsm.service;
 
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.openssl.PEMParser;
+import org.bouncycastle.operator.jcajce.JcaContentVerifierProviderBuilder;
 import org.bouncycastle.pkcs.PKCS10CertificationRequest;
 import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequest;
 import org.slf4j.Logger;
@@ -21,6 +23,7 @@ import eu.gillstrom.hsm.model.HsmVendor;
 import eu.gillstrom.hsm.model.IssuanceResponse;
 import eu.gillstrom.hsm.model.VerificationResponse;
 import eu.gillstrom.hsm.model.VerificationResponse.CertificateType;
+import eu.gillstrom.hsm.util.Fingerprints;
 import eu.gillstrom.hsm.verification.AzureHsmVerifier;
 import eu.gillstrom.hsm.verification.GoogleCloudHsmVerifier;
 import eu.gillstrom.hsm.verification.SecurosysVerifier;
@@ -28,7 +31,6 @@ import eu.gillstrom.hsm.verification.YubicoVerifier;
 
 import java.io.StringReader;
 import java.io.StringWriter;
-import java.security.MessageDigest;
 import java.security.PublicKey;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -40,6 +42,17 @@ import java.util.List;
 public class AttestationService {
 
     private static final Logger log = LoggerFactory.getLogger(AttestationService.class);
+
+    static {
+        // The CSR proof-of-possession check below builds its content-verifier
+        // provider with an explicit "BC" provider, so BouncyCastle must be a
+        // registered JCA provider. Registering it here (idempotently) keeps the
+        // requirement next to the code that depends on it rather than in
+        // deployment documentation nobody reads.
+        if (java.security.Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
+            java.security.Security.addProvider(new BouncyCastleProvider());
+        }
+    }
 
     private final BankIdService bankIdService;
     private final SecurosysVerifier securosysVerifier;
@@ -140,6 +153,23 @@ public class AttestationService {
             return IssuanceResponse.rejectedReceiptInvalid(local, verifyReceipt);
         }
 
+        // The receipt is authentic — but authenticity says nothing about which
+        // key it approved. A genuine receipt issued for some other request
+        // would otherwise authorise issuance for this CSR. Compare the
+        // gatekeeper's approved public-key fingerprint against the CSR's.
+        if (!Fingerprints.equal(verifyReceipt.getPublicKeyFingerprint(),
+                local.getCsrPublicKeyFingerprint())) {
+            log.warn("Gatekeeper receipt approves a different public key than the CSR carries "
+                    + "(verificationId={}, receipt={}, csr={})",
+                    verifyReceipt.getVerificationId(),
+                    verifyReceipt.getPublicKeyFingerprint(),
+                    local.getCsrPublicKeyFingerprint());
+            return IssuanceResponse.rejectedReceiptKeyMismatch(local, verifyReceipt,
+                    "RECEIPT_KEY_MISMATCH: the gatekeeper receipt approves public key "
+                            + verifyReceipt.getPublicKeyFingerprint()
+                            + " but this request carries " + local.getCsrPublicKeyFingerprint());
+        }
+
         // Phase 3: issuance.
         IssuedCertificate cert;
         try {
@@ -167,7 +197,57 @@ public class AttestationService {
             return IssuanceResponse.issuedButConfirmFailed(local, verifyReceipt, cert, e.getMessage());
         }
 
+        // A confirm response that arrives without exception is not by itself a
+        // closed loop. It has to be the confirm for this verification, and it
+        // has to say the registry reached the non-anomalous issued state.
+        String confirmAnomaly = confirmAnomaly(verifyReceipt, confirmResponse);
+        if (confirmAnomaly != null) {
+            log.warn("Gatekeeper confirm did not close the supervisory loop "
+                    + "(verificationId={}, issuanceId={}): {}",
+                    verifyReceipt.getVerificationId(), cert.issuanceId(), confirmAnomaly);
+            return IssuanceResponse.issuedButConfirmNotClosed(
+                    local, verifyReceipt, cert, confirmResponse, confirmAnomaly);
+        }
+
         return IssuanceResponse.issuedAndConfirmed(local, verifyReceipt, cert, confirmResponse);
+    }
+
+    /**
+     * @return {@code null} if the confirm response closes the supervisory loop
+     *         for this verification; otherwise a description of why it does
+     *         not. Anything other than {@code null} must prevent the
+     *         {@code VERIFIED_ISSUED_AND_CONFIRMED} stage: the certificate
+     *         exists but the registry entry that legitimises it does not.
+     */
+    private static String confirmAnomaly(VerifyResponse verifyReceipt,
+            IssuanceConfirmResponse confirmResponse) {
+        if (confirmResponse == null) {
+            return "gatekeeper returned no confirm response";
+        }
+        String expectedId = verifyReceipt.getVerificationId();
+        String actualId = confirmResponse.getVerificationId();
+        if (expectedId == null || actualId == null || !expectedId.equals(actualId)) {
+            return "confirm response carries verificationId " + actualId
+                    + " but the verify-step receipt carries " + expectedId;
+        }
+        IssuanceConfirmResponse.RegistryStatus status = confirmResponse.getRegistryStatus();
+        if (status == null) {
+            return "confirm response carries no registryStatus";
+        }
+        if (status != IssuanceConfirmResponse.RegistryStatus.VERIFIED_AND_ISSUED) {
+            return "gatekeeper approval registry ended in " + status
+                    + " rather than VERIFIED_AND_ISSUED"
+                    + (confirmResponse.getAnomalies() == null || confirmResponse.getAnomalies().isEmpty()
+                            ? ""
+                            : " (" + String.join("; ", confirmResponse.getAnomalies()) + ")");
+        }
+        if (!confirmResponse.isLoopClosed()) {
+            return "gatekeeper reported loopClosed=false";
+        }
+        if (confirmResponse.getPublicKeyMatch() != null && !confirmResponse.getPublicKeyMatch()) {
+            return "gatekeeper reported publicKeyMatch=false for the issued certificate";
+        }
+        return null;
     }
 
     /**
@@ -297,10 +377,28 @@ public class AttestationService {
         // Parse CSR
         PublicKey csrPublicKey;
         String keyAlgorithm;
+        byte[] csrDer;
         try {
             PKCS10CertificationRequest csr = parseCsr(request.getCsr());
+            // Proof of possession. A PKCS#10 request is self-signed by the
+            // private key belonging to the public key it carries; without
+            // checking that signature, a requester can submit any public key —
+            // including one whose private half belongs to somebody else, or one
+            // lifted from an attestation captured elsewhere — and have a
+            // certificate issued for it. Fail-closed: an unverifiable signature
+            // ends the request here.
+            if (!csrSignatureValid(csr)) {
+                errors.add("CSR_SIGNATURE_INVALID: the CSR's own signature does not verify under "
+                        + "the public key it carries — proof of possession failed");
+                return buildErrorResponse(errors, certType);
+            }
             csrPublicKey = extractPublicKey(csr);
             keyAlgorithm = csrPublicKey.getAlgorithm();
+            // Hash the DER exactly as submitted rather than a re-encoding of
+            // the parsed structure: the client computes its half of the binding
+            // over the bytes it sends, and a re-encoding could in principle
+            // differ from them.
+            csrDer = csrDerBytes(request.getCsr());
         } catch (Exception e) {
             errors.add("Invalid CSR: " + e.getMessage());
             return buildErrorResponse(errors, certType);
@@ -313,6 +411,21 @@ public class AttestationService {
                 request.getBankIdOcspResponse());
         if (!bankIdResult.isValid()) {
             errors.add("BankID verification failed: " + bankIdResult.getError());
+        }
+
+        // Bind the authorisation act to THIS request. The BankID signature
+        // proves that a person signed something; the canonical binding string
+        // in usrNonVisibleData is what proves they signed this organisation
+        // number, this Swish number and this CSR. Without the comparison a
+        // signature legitimately collected for one request can be presented
+        // with another request's CSR.
+        String expectedBinding = BankIdService.expectedBinding(
+                request.getOrganisationNumber(), request.getSwishNumber(), csrDer);
+        if (!BankIdService.isBoundToRequest(bankIdResult.getUsrNonVisibleData(), expectedBinding)) {
+            errors.add("BANKID_NOT_BOUND_TO_REQUEST: usrNonVisibleData in the BankID signature is "
+                    + "missing or does not equal the canonical binding for this request "
+                    + "(expected format " + BankIdService.BINDING_VERSION
+                    + ";org=<organisationNumber>;swish=<swishNumber>;csr-sha256=<hex>)");
         }
 
         SignatoryRightsVerifier.Result signatoryResult = signatoryRightsVerifier.check(
@@ -561,6 +674,41 @@ public class AttestationService {
         }
     }
 
+    /**
+     * The DER encoding of the submitted CSR: the PEM armour and all whitespace
+     * stripped, then base64-decoded. This is the byte sequence the
+     * {@code csr-sha256} component of the BankID request binding is computed
+     * over, on both sides.
+     */
+    private static byte[] csrDerBytes(String csrInput) {
+        String body = csrInput
+                .replace("-----BEGIN CERTIFICATE REQUEST-----", "")
+                .replace("-----END CERTIFICATE REQUEST-----", "")
+                .replace("-----BEGIN NEW CERTIFICATE REQUEST-----", "")
+                .replace("-----END NEW CERTIFICATE REQUEST-----", "")
+                .replaceAll("\\s+", "");
+        return Base64.getDecoder().decode(body);
+    }
+
+    /**
+     * Verify the CSR's own signature under the public key carried in the CSR
+     * (PKCS#10 proof of possession, RFC 2986 §4.2).
+     *
+     * @return {@code true} only if the signature verifies; {@code false} on a
+     *         bad signature and on any error while attempting the check —
+     *         an unverifiable CSR is never accepted.
+     */
+    private boolean csrSignatureValid(PKCS10CertificationRequest csr) {
+        try {
+            return csr.isSignatureValid(new JcaContentVerifierProviderBuilder()
+                    .setProvider(BouncyCastleProvider.PROVIDER_NAME)
+                    .build(csr.getSubjectPublicKeyInfo()));
+        } catch (Exception e) {
+            log.warn("CSR proof-of-possession check could not be completed: {}", e.getMessage());
+            return false;
+        }
+    }
+
     private PublicKey extractPublicKey(PKCS10CertificationRequest csr) throws Exception {
         var pkInfo = csr.getSubjectPublicKeyInfo();
         var keySpec = new java.security.spec.X509EncodedKeySpec(pkInfo.getEncoded());
@@ -569,22 +717,14 @@ public class AttestationService {
         return java.security.KeyFactory.getInstance(keyAlg).generatePublic(keySpec);
     }
 
+    /**
+     * Canonical public-key fingerprint — lowercase colon-hex SHA-256 over the
+     * SubjectPublicKeyInfo. Delegates to {@link Fingerprints}, which is the
+     * single definition of the format that also travels on the gatekeeper wire
+     * in {@code VerifyResponse.publicKeyFingerprint}.
+     */
     private String fingerprint(PublicKey key) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] digest = md.digest(key.getEncoded());
-            StringBuilder sb = new StringBuilder();
-            for (byte b : digest) {
-                sb.append(String.format("%02x:", b & 0xff));
-            }
-            return sb.substring(0, sb.length() - 1);
-        } catch (Exception e) {
-            // SHA-256 is mandatory in every JRE (JCA guarantee), so this branch
-            // should be unreachable — but if it ever fires we want a loud signal
-            // rather than a silent "error" string.
-            log.error("Unexpected SHA-256 fingerprint failure", e);
-            return "error";
-        }
+        return Fingerprints.ofPublicKey(key);
     }
 
     private VerificationResponse buildErrorResponse(List<String> errors, CertificateType type) {

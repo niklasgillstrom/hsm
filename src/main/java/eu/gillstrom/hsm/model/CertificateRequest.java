@@ -17,6 +17,15 @@ public class CertificateRequest {
     @NotBlank(message = "BankID signature is required")
     private String bankIdSignatureResponse;
 
+    /**
+     * Base64 OCSP response for the BankID user certificate. Mandatory: PKIX
+     * validation of the BankID chain runs with revocation checking disabled, so
+     * this response is the only evidence of the certificate's status at the
+     * moment of authorisation, and its {@code producedAt} is the authoritative
+     * signing time. {@code BankIdService.verify} returns {@code valid=false}
+     * without it.
+     */
+    @NotBlank(message = "BankID OCSP response is required")
     private String bankIdOcspResponse;
 
     @NotBlank(message = "Organisation number is required")

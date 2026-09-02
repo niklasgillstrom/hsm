@@ -19,7 +19,7 @@ A systematic check of the triad against its own documentation found places where
 - Payload is read only from inside the element the signature's Reference covers.
 - New `BankIdSignatureVerificationTest` and `BankIdFixture`: nine tests, eight of them rejections, against synthetic material.
 
-Reviewers should start with `mvn -B test` (35 tests, no network, no HSM, no BankID) and then read the corrections section.
+Reviewers should start with `mvn -B test` (51 tests, no network, no HSM, no BankID) and then read the corrections section.
 
 ---
 
@@ -74,7 +74,7 @@ A reviewer can independently reproduce different layers of the supervisory flow 
 
 | Layer | What runs without external infrastructure | What requires a deployed NCA gatekeeper |
 | ----- | ------------------------------------------ | ---------------------------------------- |
-| Local verification (Phase 1) | `mvn -B test` — all 35 tests run without network, HSM or BankID. | Nothing additional. |
+| Local verification (Phase 1) | `mvn -B test` — all 51 tests run without network, HSM or BankID. | Nothing additional. |
 | Gatekeeper verify + confirm (Phases 2 + 4) | `GatekeeperFlowTest` runs against `MockGatekeeperClient`, an in-process gatekeeper that signs receipts with an ephemeral RSA key registered in the local trust store. The byte-identity of the canonical receipt is locked by `WireFormatGoldenBytesTest` — any drift between this repo's canonicalizer and the gatekeeper repo's canonicalizer breaks the assertion in **both** repos at the same time. | An end-to-end test against a live `gatekeeper` instance (with mTLS configured, an issuer-CA bundle for Step 7, and `gatekeeper.signing.mode=configured` against a real seal certificate) requires deploying the gatekeeper — see `gatekeeper/PEER_REVIEW_GUIDE.md`. |
 | Real attestation evidence | `RealAttestationFixtureTest` exercises real Yubico and Securosys fixtures against the pinned vendor roots. No HSM hardware required at test-run time; the fixtures were captured at the originating site. | Fresh HSM hardware is only required to capture **new** fixtures. |
 | Cross-repo byte-format compatibility | `WireFormatGoldenBytesTest` in this repo asserts a hardcoded golden string. The same string is asserted in the gatekeeper repo's `WireFormatGoldenBytesTest`. Any deviation fails both tests. | Nothing additional. |
