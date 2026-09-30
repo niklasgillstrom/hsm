@@ -11,6 +11,8 @@ import org.bouncycastle.cert.ocsp.SingleResp;
 import org.bouncycastle.operator.jcajce.JcaContentVerifierProviderBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -159,29 +161,44 @@ public class BankIdService {
 
     private final Set<TrustAnchor> bankIdTrustAnchors;
 
-    public BankIdService() {
-        try {
-            CertificateFactory cf = CertificateFactory.getInstance("X.509");
-            this.bankIdTrustAnchors = Set.of(
-                    new TrustAnchor(loadPinnedRoot(cf, BANKID_ROOT_CA_V1), null),
-                    new TrustAnchor(loadPinnedRoot(cf, TEST_BANKID_ROOT_CA_V1_TEST), null));
-        } catch (Exception e) {
-            // Fail-closed: without pinned roots there is nothing to anchor
-            // against, so refuse to construct the bean and let startup fail.
-            throw new IllegalStateException(
-                    "Failed to load pinned BankID root certificates - BankIdService cannot be constructed", e);
-        }
+    @Autowired
+    public BankIdService(@Value("${swish.bankid.allow-test-root:false}") boolean allowTestRoot) {
+        this(pinnedTrustAnchors(allowTestRoot));
     }
 
     /**
      * Test seam. The pinned roots are compile-time constants, so a synthetic
      * chain built in a unit test can never validate against them. This
      * constructor lets a test supply its own anchors and exercise the real
-     * validation logic; production code uses the no-arg constructor and cannot
+     * validation logic; production code uses the public constructor and cannot
      * reach this one.
      */
     BankIdService(Set<TrustAnchor> trustAnchors) {
         this.bankIdTrustAnchors = Set.copyOf(trustAnchors);
+    }
+
+    static Set<TrustAnchor> pinnedTrustAnchors(boolean allowTestRoot) {
+        X509Certificate productionRoot;
+        X509Certificate testRoot;
+        try {
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            productionRoot = loadPinnedRoot(cf, BANKID_ROOT_CA_V1);
+            testRoot = loadPinnedRoot(cf, TEST_BANKID_ROOT_CA_V1_TEST);
+        } catch (Exception e) {
+            // Fail-closed: without pinned roots there is nothing to anchor
+            // against, so refuse to construct the bean and let startup fail.
+            throw new IllegalStateException(
+                    "Failed to load pinned BankID root certificates - BankIdService cannot be constructed", e);
+        }
+        return trustAnchors(productionRoot, testRoot, allowTestRoot);
+    }
+
+    static Set<TrustAnchor> trustAnchors(X509Certificate productionRoot, X509Certificate testRoot,
+            boolean allowTestRoot) {
+        if (!allowTestRoot) {
+            return Set.of(new TrustAnchor(productionRoot, null));
+        }
+        return Set.of(new TrustAnchor(productionRoot, null), new TrustAnchor(testRoot, null));
     }
 
     private static X509Certificate loadPinnedRoot(CertificateFactory cf, String pem) throws Exception {

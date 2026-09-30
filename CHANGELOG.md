@@ -4,6 +4,153 @@ Versions before 1.4.0 have no entry here; their history is recorded in
 `PEER_REVIEW_GUIDE.md` ("Version 1.3.0 — what changed and what to verify" and
 "Corrections after documentation-versus-code review").
 
+## 1.5.0
+
+**Deploy together with gatekeeper 1.5.0 and railgate 1.5.0.** The receipt wire
+format is unchanged (`v2`, byte-identical to gatekeeper's; `WireFormatGoldenBytesTest`
+is untouched). What couples the three releases is the confirm step: gatekeeper
+1.5.0 stores the issued signing certificate that hsm sends at Step 7, and railgate
+1.5.0 looks that certificate up by (certificate serial, issuer DN) at settlement.
+Without the stored certificate settlement fails with `CERT_NOT_FOUND`.
+
+A third pass, starting from the question 1.4.0 left open and then following the
+production (`http`) path end to end instead of through the mock. Every defect
+below was present in 1.4.0 and earlier; none is a regression.
+
+- **Yubico capabilities were read in the wrong byte order.** `YubicoVerifier`
+  folded the capabilities extension (1.3.6.1.4.1.41482.4.5) little-endian, so
+  `capBytes[0]` supplied bits 0–7. Yubico's reference implementation reads the
+  value big-endian: python-yubihsm `objects.py`, `_get_int`, is
+  `int.from_bytes(..., "big")`, and `defs.py` puts `EXPORT_WRAPPED` at `1 << 12`
+  and `EXPORTABLE_UNDER_WRAP` at `1 << 16`. Read little-endian, both flags were
+  taken from the wrong bytes: a key carrying `EXPORTABLE_UNDER_WRAP`
+  (`00 00 00 00 00 01 00 00`) or `EXPORT_WRAPPED` (`00 00 00 00 00 00 10 00`) was
+  reported as not exportable. It survived review because the only real fixture
+  (`examples/yubico/request.json`, `00 00 00 04 00 00 06 60`) has neither flag set
+  and reads as "no export flags" in both byte orders, so the end-to-end test could
+  not tell the two readings apart; 1.4.0 recorded the question instead of
+  answering it. Read big-endian, the fixture decodes to `SIGN_PKCS`, `SIGN_PSS`,
+  `DECRYPT_PKCS`, `DECRYPT_OAEP` and `SIGN_ATTESTATION_CERTIFICATE` — a coherent
+  RSA key; read little-endian it decodes to template and cipher bits that make no
+  sense for it. The fold is now `caps = (caps << 8) | (b & 0xFF)` in the
+  package-private `YubicoVerifier.parseCapabilities`, and the `TODO` is gone.
+  gatekeeper 1.5.0 carries the identical fix. Tests: `YubicoVerifierTest`
+  `capabilitiesOfRealFixtureCarryNoExportFlags`,
+  `capabilitiesBit16IsExportableUnderWrap`, `capabilitiesBit12IsExportWrapped`,
+  and `exportableUnderWrapInAttestationCertificateIsRejected`, which runs a
+  certificate carrying the extension through `verifyYubicoAttestation`.
+- **A Yubico key that had been exported and re-imported passed the origin
+  check.** The origin extension (1.3.6.1.4.1.41482.4.3) was accepted whenever
+  `GENERATED` (0x01) was set. Yubico defines `IMPORTED_WRAPPED` (0x10) as "set in
+  combination with GENERATED/IMPORTED", so an origin of 0x11 is a key generated on
+  some device, exported under wrap and imported here — and `getKeyOrigin()`
+  reported it as `generated`. It survived review because the flags were parsed
+  correctly and only the decision read one of them. The origin is now accepted
+  only when `GENERATED` is set and neither `IMPORTED` nor `IMPORTED_WRAPPED` is;
+  `getKeyOrigin()` reports `imported_wrapped` or `imported` before `generated`.
+  Tests: `YubicoVerifierTest.originGeneratedIsAccepted` (0x01) and
+  `originGeneratedAndImportedWrappedIsRejected` (0x11).
+- **The Test BankID root was trusted in every profile.** `BankIdService` pinned
+  `Test BankID Root CA v1 Test` next to the production root unconditionally, so a
+  production deployment accepted signatures chaining to BankID's test PKI, whose
+  identities are issued for testing and say nothing about a real signatory. It
+  survived review
+  because 1.3.0 replaced a far worse anchor (whatever root the caller submitted)
+  and the question at the time was which roots to pin, not in which profile. The
+  test root is now trusted only when `swish.bankid.allow-test-root=true`; the
+  default is `false`, and only `application-dev.yaml` sets it. Tests in
+  `BankIdSignatureVerificationTest`: `testRootIsNotTrustedByDefault`,
+  `testRootIsTrustedWhenAllowed` (fixture signature, fixture root in the test-root
+  position) and `pinnedTestRootIsAnAnchorOnlyWhenAllowed`.
+- **`HttpGatekeeperClient` could not read a single gatekeeper response.**
+  `VerifyResponse`, its nested `KeyProperties` and `DoraCompliance`, and
+  `IssuanceConfirmResponse` were `@Data @Builder` only. Lombok then generates a
+  package-private all-args constructor and no creator Jackson can use, so every
+  response from a real gatekeeper failed to deserialise and `mode=http` could
+  never issue a SIGNING certificate — fail-closed, but not working. It survived
+  review because every test used `MockGatekeeperClient`, which builds the objects
+  directly and never touches JSON. All four types now carry `@NoArgsConstructor
+  @AllArgsConstructor` alongside `@Builder`. Test:
+  `HttpGatekeeperClientDeserializationTest`, which parses bodies shaped like
+  gatekeeper's `VerificationResponse` and `IssuanceConfirmationResponse` with the
+  client's own `ObjectMapper` (now package-private) and checks that the
+  deserialised receipt still canonicalises to the `v2` golden string.
+- **`swish.gatekeeper.trusted-keys` registered at most one certificate.**
+  `GatekeeperKeyRegistry` split the value on `",-----END CERTIFICATE-----"`, a
+  sequence that does not occur in real input. Newline-separated certificates (as
+  the README documents) registered only the first one; comma-separated
+  certificates (as INTEGRATION_GUIDE documents) failed startup. It survived review
+  because every test either passed an empty value or registered the mock's
+  certificate programmatically. Every
+  `-----BEGIN CERTIFICATE----- … -----END CERTIFICATE-----` block is now extracted
+  and registered, whatever separates them; a non-empty value with no block fails
+  startup. Test: `GatekeeperKeyRegistryTest` (two generated certificates, both
+  formats).
+- **The verify request always said `SE`.** `AttestationService` hardcoded
+  `countryCode("SE")` in the verify body while `HttpGatekeeperClient` put the
+  configured `swish.gatekeeper.country-code` in the URL, so a non-Swedish
+  deployment sent a body that contradicted its own path. It survived review
+  because the default is `SE`. The configured value is now used for both. Test:
+  `AttestationServiceGatekeeperFlowTest.verifyRequestCarriesTheConfiguredCountryCode`.
+- **Step 7 carries the issued certificate — now asserted.** The confirm already
+  sent the issued certificate PEM with `issued=true`; nothing tested it, and with
+  gatekeeper 1.5.0 storing that certificate for railgate it is load-bearing.
+  `AttestationServiceGatekeeperFlowTest.confirmCarriesTheIssuedCertificatePem`
+  runs the full SIGNING flow on the real Yubico fixture and checks the PEM, its
+  issuer DN and its public key.
+- **`swish.gatekeeper.url` defaulted to `http://localhost:8443`.** The README
+  documented the default as "unset (fail-closed)"; with the localhost default,
+  `HttpGatekeeperClient`'s blank-URL guard could never fire. The default is now
+  empty.
+
+### Documentation
+
+- `THREAT_MODEL.md`: the confirm response was described as "cryptographically
+  bound" to the verify step; it is unsigned, and is checked, not bound. The
+  residual-risk entry still described the Step-7 nonce as missing; it exists, and
+  the residual risk is the unsigned response. `GatekeeperKeyRegistry` was
+  described as distinguishing active and retired keys; it is a flat set, and the
+  text now says so.
+- `INTEGRATION_GUIDE.md`, `CROSS_REFERENCE.md` and `PEER_REVIEW_GUIDE.md` named
+  methods that do not exist (`requestIssuance`, `issueCertificate`, `parseXml`,
+  `verifyAttestedProperties`) and described `SwishCaService` as the mock CA with
+  an `issue` method. `SwishCaService` exists, but it validates Getswish CA chains;
+  the mock CA is `MockIssuanceClient` behind `IssuanceClient`. The names now match
+  the code.
+- `THREAT_MODEL.md` said that for the cloud HSMs "unverified-owner attestations
+  are rejected". No owner anchor is bundled and no owner chain is checked, so
+  nothing rejects an attestation for that reason; only the expired-Marvell-root
+  gap is fail-closed. Corrected.
+- `INTEGRATION_GUIDE.md` rated the Azure and Google verifiers production-trustable
+  for the manufacturer chain, and `README.md` listed Azure without saying that
+  `AzureHsmVerifier` always adds `AZURE_ATTRIBUTES_UNVERIFIED`, so no Azure
+  attestation verifies. Both now say so, and that gatekeeper 1.5.0 never returns
+  COMPLIANT for Google (`GOOGLE_KEY_ORIGIN_UNVERIFIED`). hsm's own
+  `GoogleCloudHsmVerifier` still reports `keyOrigin=generated` for a
+  non-extractable key; `keyOrigin` is informational here and does not decide
+  validity. `PEER_REVIEW_GUIDE.md` said `SecurosysVerifier` loads its root from
+  the classpath; it parses a text-block constant.
+- `CROSS_REFERENCE.md`: the rows on vendor support (Art 1 §4.3, Art 2 §5.2 NFR5),
+  the Step-7 nonce and the approval-registry journal are brought into line with
+  gatekeeper 1.5.0, and the claim that the file is shipped identically in the
+  three repositories is withdrawn — the copies differ.
+
+### Dependencies
+
+- BouncyCastle `bcprov-jdk18on` and `bcpkix-jdk18on` 1.86; Tomcat 11.0.26
+  (override kept; the parent still manages 11.0.24); springdoc-openapi 3.1.1,
+  which ships swagger-ui 5.32.14; `org.webjars:swagger-ui` pinned to 5.32.15.
+- `dependency-check-maven` stays at 12.2.2, for the reason recorded under 1.4.0:
+  13.0.0 treats an absent NVD API key as an invalid key of length 0
+  (dependency-check/DependencyCheck#8715), and 13.0.0 is the latest release. The
+  plugin runs in `verify`, so upgrading would break a keyless build.
+- `maven-compiler-plugin` is not pinned in this `pom.xml`; the parent's version
+  applies.
+
+### Local end-to-end support
+
+- **`MockIssuanceClient` can issue under a configured test CA.** It generated a fresh CA key pair in memory at every start-up and never exported it, so no gatekeeper could be configured to trust the certificates it issued: a local run of the full flow ended Step 7 in `ANOMALY_PUBLIC_KEY_MISMATCH` because gatekeeper's issuer-CA check had nothing to anchor to. The new optional properties `swish.issuance.mock.ca-keystore`, `swish.issuance.mock.ca-keystore-password` and `swish.issuance.mock.ca-alias` load the CA key and certificate from a PKCS12 keystore; without them the behaviour is unchanged. The mock remains not-for-production. Tests: `MockIssuanceClientTest` (4). Used by the local end-to-end harness in the gatekeeper repository (`gatekeeper/e2e`).
+
 ## 1.4.0
 
 A second pass over the code against its own documentation, in the same spirit as

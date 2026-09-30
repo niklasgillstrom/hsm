@@ -194,8 +194,10 @@ The gatekeeper and issuance components are pluggable via `application.yaml` / en
 | `swish.gatekeeper.url` | unset (fail-closed) | NCA gatekeeper URL, e.g. `https://dora-api.fi.se/v1/attestation` |
 | `swish.gatekeeper.country-code` | `SE` | ISO 3166-1 alpha-2 of the operating NCA |
 | `swish.gatekeeper.timeout-ms` | `5000` | site policy |
-| `swish.gatekeeper.trusted-keys` | empty | newline-separated PEM certificates of authoritative gatekeeper signing keys, including retired keys still relevant for receipts within the DORA Article 28(6) 5-year retention window |
+| `swish.gatekeeper.trusted-keys` | empty | newline- or comma-separated PEM certificates of authoritative gatekeeper signing keys, including retired keys still relevant for receipts within the DORA Article 28(6) 5-year retention window |
 | `swish.issuance.mode` | `mock` | replace with custom `IssuanceClient` against the Getswish CA |
+| `swish.bankid.allow-test-root` | `false` (`true` in `application-dev.yaml`) | `false` — the `Test BankID Root CA v1 Test` anchor is trusted only when this is `true` |
+| `swish.issuance.mock.ca-keystore` / `-password` / `ca-alias` | empty | only for local runs: PKCS12 keystore holding the mock issuing CA, so a local gatekeeper can trust it; empty means a fresh CA per start-up |
 
 The three gatekeeper modes are:
 
@@ -254,8 +256,8 @@ Steps 2–4 reflect Swish's current operational integration (BankID for signator
 |--------|--------|----------------|
 | Securosys Primus | ✅ | `attestationData` (XML), `attestationSignature`, `attestationCertChain` |
 | Yubico YubiHSM 2 | ✅ | `attestationCertChain` |
-| Azure Managed HSM | ⚠️ | `attestationData` (JSON from `az keyvault key get-attestation`). Manufacturer-chain only; owner-chain (Microsoft) not yet implemented; Marvell trust anchor expired 2025-11-16 (deployer must refresh). |
-| Google Cloud HSM | ⚠️ | `attestationData`, `attestationCertChain`. Manufacturer-chain only; owner-chain (Google Hawksbill) not yet implemented; Marvell trust anchor expired 2025-11-16 (deployer must refresh). |
+| Azure Managed HSM | ⚠️ | `attestationData` (JSON from `az keyvault key get-attestation`). Never valid: `AZURE_ATTRIBUTES_UNVERIFIED` is always added, because exportability and key origin cannot be read without a parser for the Marvell attribute encoding. Manufacturer-chain only; owner-chain (Microsoft) not yet implemented; Marvell trust anchor expired 2025-11-16 (deployer must refresh). |
+| Google Cloud HSM | ⚠️ | `attestationData`, `attestationCertChain`. The gatekeeper (1.5.0) never returns COMPLIANT for it (`GOOGLE_KEY_ORIGIN_UNVERIFIED`), so the gatekeeper step of `verifyAndIssue` always rejects it. Manufacturer-chain only; owner-chain (Google Hawksbill) not yet implemented; Marvell trust anchor expired 2025-11-16 (deployer must refresh). |
 | AWS CloudHSM | ❌ | Lacks per-key attestation |
 
 
@@ -373,7 +375,7 @@ vmware.vscode-boot-dev-pack
 
 ```bash
 mvn clean package
-java -jar target/hsm-1.4.0.jar
+java -jar target/hsm-1.5.0.jar
 ```
 
 **Swagger UI** is off in every profile except `dev` (`application-dev.yaml`); the
@@ -381,7 +383,7 @@ OpenAPI document and the UI have no run-time function and are kept out of the
 deployed surface. Locally:
 
 ```bash
-java -jar target/hsm-1.4.0.jar --spring.profiles.active=dev
+java -jar target/hsm-1.5.0.jar --spring.profiles.active=dev
 # http://localhost:8080/swagger-ui.html   http://localhost:8080/v3/api-docs
 ```
 

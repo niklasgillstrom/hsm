@@ -51,7 +51,7 @@ class AttestationServiceRequestBindingTest {
                 new AzureHsmVerifier(),
                 new GoogleCloudHsmVerifier(),
                 new FailClosedSignatoryRightsVerifier(),
-                null, null, null);
+                null, null, null, "SE");
     }
 
     @Test

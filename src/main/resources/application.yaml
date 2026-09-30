@@ -26,12 +26,12 @@ swish:
     mode: ${SWISH_GATEKEEPER_MODE:fail-closed}
     # Base URL of the gatekeeper. The client appends /v1/attestation/{countryCode}/verify
     # and /v1/attestation/{countryCode}/confirm.
-    url: ${SWISH_GATEKEEPER_URL:http://localhost:8443}
+    url: ${SWISH_GATEKEEPER_URL:}
     # ISO 3166-1 alpha-2 jurisdiction this entity operates in. Used in the
     # gatekeeper URL path. Default: SE (Sweden).
     country-code: ${SWISH_GATEKEEPER_COUNTRY_CODE:SE}
     timeout-ms: ${SWISH_GATEKEEPER_TIMEOUT_MS:5000}
-    # Comma-separated list of PEM-encoded X.509 certificates whose subject
+    # Newline- or comma-separated list of PEM-encoded X.509 certificates whose subject
     # public keys are accepted as authoritative gatekeeper signing certificates.
     # If unset, no receipts will validate. Set in production to the operating
     # NCA's gatekeeper certificate(s).

@@ -17,6 +17,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Trust registry of gatekeeper signing certificates. {@link ReceiptVerifier}
@@ -38,9 +40,11 @@ import java.util.Set;
  *
  * <p>Registration happens at startup from configuration:
  * <ul>
- *   <li>{@code swish.gatekeeper.trusted-keys} — comma-separated list of PEM
- *       certificates whose public keys are accepted as gatekeeper signing
- *       authorities. Empty by default.</li>
+ *   <li>{@code swish.gatekeeper.trusted-keys} — PEM certificates, separated
+ *       by newlines or commas, whose public keys are accepted as gatekeeper
+ *       signing authorities. Every
+ *       {@code -----BEGIN CERTIFICATE----- ... -----END CERTIFICATE-----}
+ *       block is registered. Empty by default.</li>
  *   <li>{@link #register(X509Certificate)} — programmatic registration,
  *       used by the mock client in test profiles.</li>
  * </ul>
@@ -53,6 +57,9 @@ public class GatekeeperKeyRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(GatekeeperKeyRegistry.class);
 
+    private static final Pattern PEM_CERTIFICATE = Pattern.compile(
+            "-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", Pattern.DOTALL);
+
     private final Map<String, X509Certificate> certsByFingerprint = new LinkedHashMap<>();
 
     public GatekeeperKeyRegistry(
@@ -60,19 +67,17 @@ public class GatekeeperKeyRegistry {
         if (trustedKeysPem == null || trustedKeysPem.isBlank()) {
             log.warn("GatekeeperKeyRegistry: no trusted gatekeeper certificates configured. "
                     + "All verify-receipts will be rejected. Configure "
-                    + "swish.gatekeeper.trusted-keys (comma-separated PEM blocks) for production.");
+                    + "swish.gatekeeper.trusted-keys (newline- or comma-separated PEM blocks) for production.");
             return;
         }
-        for (String pem : trustedKeysPem.split(",-----END CERTIFICATE-----")) {
-            String trimmed = pem.trim();
-            if (trimmed.isEmpty()) {
-                continue;
-            }
-            if (!trimmed.endsWith("-----END CERTIFICATE-----")) {
-                trimmed = trimmed + "\n-----END CERTIFICATE-----";
-            }
-            registerFromPem(trimmed);
+        Matcher m = PEM_CERTIFICATE.matcher(trustedKeysPem);
+        if (!m.find()) {
+            throw new IllegalStateException(
+                    "swish.gatekeeper.trusted-keys is set but contains no PEM certificate block");
         }
+        do {
+            registerFromPem(m.group());
+        } while (m.find());
     }
 
     /**

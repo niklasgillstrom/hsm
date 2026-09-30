@@ -1,7 +1,8 @@
 ## Developer profile — activate with: --spring.profiles.active=dev
 ##
-## The only thing this profile does is turn the OpenAPI document and Swagger UI
-## back on. Every other profile leaves them off (see application.yaml).
+## This profile turns the OpenAPI document and Swagger UI back on and trusts
+## the Test BankID root (swish.bankid.allow-test-root). Every other profile
+## leaves both off (see application.yaml).
 ## Do not deploy with this profile active.
 
 springdoc:
@@ -9,3 +10,7 @@ springdoc:
     enabled: true
   swagger-ui:
     enabled: true
+
+swish:
+  bankid:
+    allow-test-root: true

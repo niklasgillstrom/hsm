@@ -14,14 +14,22 @@ import org.bouncycastle.pkcs.PKCS10CertificationRequest;
 import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import eu.gillstrom.hsm.model.CertificateRequest;
 
+import java.io.InputStream;
 import java.io.StringWriter;
 import java.math.BigInteger;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.Key;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.KeyStore;
+import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
@@ -35,8 +43,11 @@ import java.util.UUID;
  * in-process test CA. Selected via {@code swish.issuance.mode=mock} (the only
  * mode shipped in this reference repo).
  *
- * <p>NOT a production CA. The CA key pair is regenerated on every startup;
- * issued certificates do not chain to any real Swish CA root and have no
+ * <p>NOT a production CA. The CA key pair is regenerated on every startup
+ * unless {@code swish.issuance.mock.ca-keystore} names a PKCS12 keystore, in
+ * which case the CA key and certificate are loaded from it so that a local
+ * gatekeeper can be configured to trust the issuing CA. Issued certificates
+ * do not chain to any real Swish CA root and have no
  * trust beyond demonstrating the verify→issue→confirm plumbing. A production
  * deployment must replace this with an integration against the real Getswish
  * CA, which is operated externally by Getswish AB.
@@ -51,11 +62,36 @@ public class MockIssuanceClient implements IssuanceClient {
 
     private static final Logger log = LoggerFactory.getLogger(MockIssuanceClient.class);
 
+    private final String caKeystore;
+    private final String caKeystorePassword;
+    private final String caAlias;
+
     private KeyPair caKeyPair;
     private X509Certificate caCert;
 
+    public MockIssuanceClient() {
+        this("", "", "");
+    }
+
+    @Autowired
+    public MockIssuanceClient(
+            @Value("${swish.issuance.mock.ca-keystore:}") String caKeystore,
+            @Value("${swish.issuance.mock.ca-keystore-password:}") String caKeystorePassword,
+            @Value("${swish.issuance.mock.ca-alias:}") String caAlias) {
+        this.caKeystore = caKeystore == null ? "" : caKeystore.trim();
+        this.caKeystorePassword = caKeystorePassword == null ? "" : caKeystorePassword;
+        this.caAlias = caAlias == null ? "" : caAlias.trim();
+    }
+
     @PostConstruct
     public void init() throws Exception {
+        if (!caKeystore.isEmpty()) {
+            loadCa();
+            log.warn("MockIssuanceClient is active: certificates are issued against the "
+                    + "test CA loaded from {} (subject {}). NOT for production.",
+                    caKeystore, caCert.getSubjectX500Principal().getName());
+            return;
+        }
         log.warn("MockIssuanceClient is active: certificates are issued against an "
                 + "in-process test CA whose root is regenerated on every startup. "
                 + "NOT for production. Replace with an integration against the real "
@@ -64,6 +100,38 @@ public class MockIssuanceClient implements IssuanceClient {
         kpg.initialize(2048, new SecureRandom());
         caKeyPair = kpg.generateKeyPair();
         caCert = buildCa(caKeyPair);
+    }
+
+    public X509Certificate caCertificate() {
+        return caCert;
+    }
+
+    private void loadCa() throws Exception {
+        KeyStore keyStore = KeyStore.getInstance("PKCS12");
+        char[] password = caKeystorePassword.toCharArray();
+        try (InputStream in = Files.newInputStream(Path.of(caKeystore))) {
+            keyStore.load(in, password);
+        }
+        String alias = caAlias;
+        if (alias.isEmpty()) {
+            for (String candidate : java.util.Collections.list(keyStore.aliases())) {
+                if (keyStore.isKeyEntry(candidate)) {
+                    alias = candidate;
+                    break;
+                }
+            }
+        }
+        if (alias.isEmpty() || !keyStore.isKeyEntry(alias)) {
+            throw new IllegalStateException("swish.issuance.mock.ca-keystore " + caKeystore
+                    + " holds no private key entry" + (caAlias.isEmpty() ? "" : " under alias " + caAlias));
+        }
+        Key key = keyStore.getKey(alias, password);
+        if (!(key instanceof PrivateKey privateKey)) {
+            throw new IllegalStateException("Entry " + alias + " in " + caKeystore + " is not a private key");
+        }
+        X509Certificate certificate = (X509Certificate) keyStore.getCertificate(alias);
+        caKeyPair = new KeyPair(certificate.getPublicKey(), privateKey);
+        caCert = certificate;
     }
 
     @Override

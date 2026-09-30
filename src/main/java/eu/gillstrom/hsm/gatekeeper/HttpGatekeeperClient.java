@@ -46,7 +46,7 @@ public class HttpGatekeeperClient implements GatekeeperClient {
 
     private static final Logger log = LoggerFactory.getLogger(HttpGatekeeperClient.class);
 
-    private static final ObjectMapper MAPPER = new ObjectMapper()
+    static final ObjectMapper MAPPER = new ObjectMapper()
             .registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);

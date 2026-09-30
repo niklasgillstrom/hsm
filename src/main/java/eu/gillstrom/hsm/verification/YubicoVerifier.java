@@ -284,35 +284,7 @@ public class YubicoVerifier implements HsmAttestationVerifier {
                     case CAPABILITIES_OID -> {
                         capabilitiesSeen = true;
                         ASN1BitString bs = ASN1BitString.getInstance(content);
-                        byte[] capBytes = bs.getBytes();
-                        long caps = 0;
-                        // TODO(v1.4.0, open question): byte order. This folds
-                        // the capability bit string little-endian — capBytes[0]
-                        // supplies bits 0-7. Yubico's YubiHSM 2 attestation
-                        // documentation
-                        // (https://developers.yubico.com/YubiHSM2/Concepts/Attestation.html
-                        // and the capability table under
-                        // https://developers.yubico.com/YubiHSM2/Concepts/Capability.html)
-                        // does not state the encoding of extension
-                        // 1.3.6.1.4.1.41482.4.5 unambiguously, and an ASN.1 BIT
-                        // STRING is conventionally read most-significant-bit
-                        // first, which would put EXPORT_WRAPPED and
-                        // EXPORTABLE_UNDER_WRAP at different offsets. The
-                        // interpretation is deliberately left unchanged in
-                        // v1.4.0 rather than swapped on a guess: changing it
-                        // without a documented ground truth would trade one
-                        // unverified reading for another. Resolve against
-                        // Yubico's specification (or a device-produced
-                        // attestation with known capabilities set) before
-                        // relying on the exportability flags for a production
-                        // compliance decision.
-                        for (int i = 0; i < Math.min(capBytes.length, 8); i++) {
-                            caps |= ((long) (capBytes[i] & 0xFF)) << (8 * i);
-                        }
-                        boolean canExportWrapped = (caps & (1L << EXPORT_WRAPPED_BIT)) != 0;
-                        boolean exportableUnderWrap = (caps & (1L << EXPORTABLE_UNDER_WRAP_BIT)) != 0;
-                        result.setExportableUnderWrap(exportableUnderWrap);
-                        result.setCanExportWrapped(canExportWrapped);
+                        parseCapabilities(bs.getBytes(), result);
                     }
                     case LABEL_OID -> {
                         ASN1UTF8String label = ASN1UTF8String.getInstance(content);
@@ -336,8 +308,9 @@ public class YubicoVerifier implements HsmAttestationVerifier {
             }
 
             // Validate key origin and exportability
-            if (!result.isGenerated()) {
-                result.addError("Key was not generated on HSM (origin: " + result.getKeyOrigin() + ")");
+            if (!result.isGenerated() || result.isImported() || result.isImportedWrapped()) {
+                result.addError("Key was not generated on HSM and kept there (origin: "
+                        + result.getKeyOrigin() + ")");
             }
             if (result.isExportableUnderWrap() || result.isCanExportWrapped()) {
                 result.addError("Key has export capabilities - not allowed for signing keys");
@@ -346,6 +319,15 @@ public class YubicoVerifier implements HsmAttestationVerifier {
         } catch (Exception e) {
             result.addError("Failed to parse attestation extensions: " + e.getMessage());
         }
+    }
+
+    static void parseCapabilities(byte[] capBytes, YubicoAttestationResult result) {
+        long caps = 0;
+        for (byte b : capBytes) {
+            caps = (caps << 8) | (b & 0xFF);
+        }
+        result.setCanExportWrapped((caps & (1L << EXPORT_WRAPPED_BIT)) != 0);
+        result.setExportableUnderWrap((caps & (1L << EXPORTABLE_UNDER_WRAP_BIT)) != 0);
     }
 
     @Override
@@ -493,12 +475,12 @@ public class YubicoVerifier implements HsmAttestationVerifier {
         }
 
         public String getKeyOrigin() {
-            if (generated)
-                return "generated";
             if (importedWrapped)
                 return "imported_wrapped";
             if (imported)
                 return "imported";
+            if (generated)
+                return "generated";
             return "unknown";
         }
 

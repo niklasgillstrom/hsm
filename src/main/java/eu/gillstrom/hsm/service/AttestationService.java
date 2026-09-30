@@ -7,6 +7,7 @@ import org.bouncycastle.pkcs.PKCS10CertificationRequest;
 import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import eu.gillstrom.hsm.gatekeeper.VerifyRequest;
 import eu.gillstrom.hsm.gatekeeper.VerifyResponse;
@@ -63,6 +64,7 @@ public class AttestationService {
     private final GatekeeperClient gatekeeperClient;
     private final ReceiptVerifier receiptVerifier;
     private final IssuanceClient issuanceClient;
+    private final String gatekeeperCountryCode;
 
     public AttestationService(BankIdService bankIdService,
             SecurosysVerifier securosysVerifier,
@@ -72,7 +74,8 @@ public class AttestationService {
             SignatoryRightsVerifier signatoryRightsVerifier,
             GatekeeperClient gatekeeperClient,
             ReceiptVerifier receiptVerifier,
-            IssuanceClient issuanceClient) {
+            IssuanceClient issuanceClient,
+            @Value("${swish.gatekeeper.country-code:SE}") String gatekeeperCountryCode) {
         this.bankIdService = bankIdService;
         this.securosysVerifier = securosysVerifier;
         this.yubicoVerifier = yubicoVerifier;
@@ -82,6 +85,7 @@ public class AttestationService {
         this.gatekeeperClient = gatekeeperClient;
         this.receiptVerifier = receiptVerifier;
         this.issuanceClient = issuanceClient;
+        this.gatekeeperCountryCode = gatekeeperCountryCode;
     }
 
     /**
@@ -131,7 +135,7 @@ public class AttestationService {
         }
 
         // Phase 2: gatekeeper verify.
-        VerifyRequest verifyRequest = buildVerifyRequest(request, local);
+        VerifyRequest verifyRequest = buildVerifyRequest(request, local, gatekeeperCountryCode);
         VerifyResponse verifyReceipt;
         try {
             verifyReceipt = gatekeeperClient.verify(verifyRequest);
@@ -258,7 +262,7 @@ public class AttestationService {
      * excluded; it is not part of the gatekeeper's mandate.
      */
     private static VerifyRequest buildVerifyRequest(CertificateRequest request,
-            VerificationResponse local) {
+            VerificationResponse local, String countryCode) {
         try {
             PublicKey pk = parseCsrPublicKey(request.getCsr());
             String publicKeyPem = toPublicKeyPem(pk);
@@ -271,7 +275,7 @@ public class AttestationService {
                     .supplierIdentifier(request.getOrganisationNumber())
                     .supplierName(local == null ? null : local.getBankIdRelyingPartyName())
                     .keyPurpose(local == null ? null : ("Swish " + local.getCertificateType()))
-                    .countryCode("SE")
+                    .countryCode(countryCode)
                     .build();
         } catch (Exception e) {
             // CSR has already been parsed once locally, so this should not fire;

@@ -1,7 +1,9 @@
 package eu.gillstrom.hsm.gatekeeper;
 
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 import java.util.List;
@@ -32,6 +34,8 @@ import java.util.List;
  */
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class VerifyResponse {
 
     /** Primary key linking verify, registry, this receipt, and the confirm step. */
@@ -81,6 +85,8 @@ public class VerifyResponse {
     /** Decision-relevant key flags. All four must be true for compliance. */
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class KeyProperties {
         /** True iff the key was generated inside the device, never imported. */
         private boolean generatedOnDevice;
@@ -100,6 +106,8 @@ public class VerifyResponse {
      */
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class DoraCompliance {
         /** Article 5(2)(b) — management body maintains high standards. */
         private boolean article5_2b;

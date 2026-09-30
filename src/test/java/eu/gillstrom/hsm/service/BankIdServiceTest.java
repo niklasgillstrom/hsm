@@ -18,7 +18,7 @@ class BankIdServiceTest {
 
     @Test
     void invalidBase64InputReturnsInvalid() {
-        BankIdService service = new BankIdService();
+        BankIdService service = new BankIdService(false);
 
         BankIdService.BankIdResult result = service.verify("not-valid-base64!!!", null);
 
@@ -28,7 +28,7 @@ class BankIdServiceTest {
 
     @Test
     void xmlWithoutSignatureElementReturnsInvalidWithDsigError() {
-        BankIdService service = new BankIdService();
+        BankIdService service = new BankIdService(false);
 
         // Well-formed XML but no <Signature> element and no certificates.
         String xml = "<bankIdSignedData><signingTime>2026-01-01T00:00:00Z</signingTime></bankIdSignedData>";
@@ -49,7 +49,7 @@ class BankIdServiceTest {
 
     @Test
     void emptyInputReturnsInvalid() {
-        BankIdService service = new BankIdService();
+        BankIdService service = new BankIdService(false);
 
         BankIdService.BankIdResult result = service.verify("", null);
 

@@ -15,12 +15,12 @@ The audience is a **systems / integration engineer** at the FE who has been aske
 | Component | Role | Production-trustable as-is? |
 | --- | --- | --- |
 | `verification/SecurosysVerifier`, `verification/YubicoVerifier` | Vendor-specific HSM attestation verifiers; pin real vendor roots; PKIX-validated chain + signature + non-extractability check | Yes |
-| `verification/AzureHsmVerifier`, `verification/GoogleCloudHsmVerifier` | Cloud-HSM verifiers; pin Marvell LiquidSecurity root | Yes (manufacturer chain), but cert expired 2025-11-16 — rotate before relying on post-expiry attestations; dual-chain owner-root validation not implemented (see verifier SECURITY NOTE) |
+| `verification/AzureHsmVerifier`, `verification/GoogleCloudHsmVerifier` | Cloud-HSM verifiers; pin Marvell LiquidSecurity root | **No** for Azure: every Azure attestation fails with `AZURE_ATTRIBUTES_UNVERIFIED`, because no parser for the Marvell attribute encoding ships. Google: manufacturer chain only, and the gatekeeper (1.5.0) never returns COMPLIANT for it (`GOOGLE_KEY_ORIGIN_UNVERIFIED`). For both, the cert expired 2025-11-16 — rotate before relying on post-expiry attestations; dual-chain owner-root validation not implemented (see verifier SECURITY NOTE) |
 | `gatekeeper/GatekeeperClient` (interface) + `HttpGatekeeperClient` | The FE → NCA verify/confirm RPC, two-step protocol | Yes — `mode=http` against the NCA's published gatekeeper URL |
 | `gatekeeper/ReceiptVerifier`, `gatekeeper/ReceiptCanonicalizer` | Validates the gatekeeper-signed receipt against the canonical bytes the FE submitted | Yes |
 | `gatekeeper/GatekeeperKeyRegistry` | Trusted set of gatekeeper signing certificates | Yes — populate via `swish.gatekeeper.trusted-keys` |
 | `service/AttestationService`, `controller/AttestationController` | End-to-end FE-side endpoint that takes CSR + attestation + BankID-signed mandate from a TL, runs the four-phase pipeline, returns issued cert | Reference flow only — adapt the wiring into the FE's own controller layer |
-| `issuance/SwishCaService` | Mock CA that signs the CSR locally for the reference flow | **No** — replace with the FE's real CA integration |
+| `issuance/IssuanceClient` (interface) + `MockIssuanceClient` | Mock CA that signs the CSR locally for the reference flow | **No** — replace with the FE's real CA integration |
 | `service/SignatoryRightsVerifier` (interface) + `FailClosedSignatoryRightsVerifier` + `MockAgreementRegistrySignatoryRightsVerifier` | Validates that the BankID-signed mandate authorises the requesting TL | **No** for production — write a custom adapter against the FE's actual signatory-rights database |
 | `service/BankIdService` | BankID signature verification (operational precondition for issuance) | Reference structure — adapt to the FE's actual BankID provider integration |
 
@@ -60,7 +60,7 @@ In an FE that has an existing CSR-issuance pipeline, the integration points are:
 - **Before** the FE's CA signs anything: insert Phase 1 (local verification) + Phase 2 (`gatekeeper.verify`). If either fails, abort issuance with a 4xx to the TL — the FE has not satisfied its Article 6(10) duty and a sanction-bearing breach would result if it proceeded.
 - **After** the FE's CA returns a signed cert but before the cert is delivered to the TL: insert Phase 4 (`gatekeeper.confirm`). If `confirm` fails (e.g., gatekeeper rejects on public-key mismatch or registry anomaly), the FE must NOT deliver the cert; revoke it immediately.
 
-The reference flow in `AttestationService.requestIssuance(...)` shows the orchestration in one place. The FE's production code can follow the same sequence or split it across services, as long as the four phases happen in order and the second/fourth complete before any production-trust signal (cert delivery to TL, registration in payment infrastructure, etc.) is emitted.
+The reference flow in `AttestationService.verifyAndIssue(...)` shows the orchestration in one place. The FE's production code can follow the same sequence or split it across services, as long as the four phases happen in order and the second/fourth complete before any production-trust signal (cert delivery to TL, registration in payment infrastructure, etc.) is emitted.
 
 ---
 
@@ -89,15 +89,15 @@ Activate via `swish.signatory-rights.mode=<your-adapter>`. The default fail-clos
 
 The reference verifier validates the XML-DSig structure that comes back from a real BankID flow, so the cryptographic-validation layer is reusable; only the BankID-API integration is FE-specific.
 
-### 3.3 Issuing CA (`IssuanceClient` / replacement for `SwishCaService`)
+### 3.3 Issuing CA (`IssuanceClient` / replacement for `MockIssuanceClient`)
 
-The mock `SwishCaService` signs CSRs with an ephemeral in-process test CA. Production: wire the FE's actual CA — common patterns are:
+The mock `MockIssuanceClient` signs CSRs with an ephemeral in-process test CA. Production: wire the FE's actual CA — common patterns are:
 
 - **EJBCA** integration via REST/SOAP API.
 - **Microsoft AD CS** via DCOM / certreq.
 - **Custom in-house CA** — direct PKCS#11 access to the CA's signing HSM.
 
-Replace `SwishCaService` with a class that takes the CSR + attested key fingerprint + verificationId and returns a signed cert. The verificationId must be retained alongside the cert in the FE's issuance record (DORA Article 28(6)).
+Replace `MockIssuanceClient` with an `IssuanceClient` implementation that takes the `CertificateRequest` (carrying the CSR) + verificationId and returns the signed cert as an `IssuedCertificate`. `IssuedCertificate.certificatePem` must carry the issued certificate: `AttestationService` sends it to the gatekeeper at confirm. The verificationId must be retained alongside the cert in the FE's issuance record (DORA Article 28(6)).
 
 ---
 
@@ -109,7 +109,7 @@ Replace `SwishCaService` with a class that takes the CSR + attested key fingerpr
 | `SWISH_GATEKEEPER_URL` | NCA's published gatekeeper URL | `https://gatekeeper.fi.se:8443` (or jurisdictional equivalent) |
 | `SWISH_GATEKEEPER_COUNTRY_CODE` | ISO-3166-1 alpha-2 jurisdiction code | `SE` (or relevant Member State) |
 | `SWISH_GATEKEEPER_TIMEOUT_MS` | RPC timeout | `5000` (or higher for cross-border traffic) |
-| `SWISH_GATEKEEPER_TRUSTED_KEYS` | Comma-separated PEMs of NCA gatekeeper signing certs that this FE accepts | The NCA's published certificate from `GET /v1/gatekeeper/keys` |
+| `SWISH_GATEKEEPER_TRUSTED_KEYS` | Newline- or comma-separated PEMs of NCA gatekeeper signing certs that this FE accepts | The NCA's published certificate from `GET /v1/gatekeeper/keys` |
 | `SWISH_SIGNATORY_RIGHTS_MODE` | Signatory-rights adapter | The FE's custom adapter name; **must not stay at `fail-closed`** in production |
 | `SWISH_ISSUANCE_MODE` | CA backend | The FE's custom integration; **must not stay at `mock`** in production |
 

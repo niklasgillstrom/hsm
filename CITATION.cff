@@ -14,11 +14,18 @@ abstract: >-
   OCSP responder certificate is verified against the issuing CA, the
   Yubico verifier fails closed on a missing capabilities extension, and
   the receipt wire format moves to v2 in lockstep with gatekeeper 1.4.0.
+  Version 1.5.0 reads the Yubico capabilities extension big-endian as
+  Yubico's reference implementation does, rejects Yubico keys that were
+  exported and re-imported, trusts the Test BankID root only when
+  explicitly enabled, makes gatekeeper responses deserialisable by the
+  HTTP client, registers every configured gatekeeper certificate, and
+  sends the configured country code, for deployment together with
+  gatekeeper 1.5.0 and railgate 1.5.0.
   Companions: gatekeeper (NCA-operated certificate-issuance gate and
   settlement-time signature verification) and railgate (central-bank
   settlement-rail enforcement).
-version: "1.4.0"
-date-released: "2026-09-02"
+version: "1.5.0"
+date-released: "2026-09-30"
 license: MIT
 repository-code: "https://github.com/niklasgillstrom/hsm"
 authors:

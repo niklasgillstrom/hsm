@@ -201,4 +201,41 @@ class BankIdSignatureVerificationTest {
 
         assertThat(r.isValid()).isFalse();
     }
+
+    @Test
+    @DisplayName("A signature chaining to the test root is rejected unless the test root is allowed")
+    void testRootIsNotTrustedByDefault() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        BankIdService production = new BankIdService(
+                BankIdService.trustAnchors(fx.foreignCaCert, fx.rootCert, false));
+
+        BankIdService.BankIdResult r = production.verify(sig, fx.ocspResponseBase64(sig));
+
+        assertThat(r.isValid()).isFalse();
+    }
+
+    @Test
+    @DisplayName("A signature chaining to the test root is accepted when the test root is allowed")
+    void testRootIsTrustedWhenAllowed() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        BankIdService dev = new BankIdService(
+                BankIdService.trustAnchors(fx.foreignCaCert, fx.rootCert, true));
+
+        BankIdService.BankIdResult r = dev.verify(sig, fx.ocspResponseBase64(sig));
+
+        assertThat(r.isValid()).as("verification error: %s", r.getError()).isTrue();
+    }
+
+    @Test
+    @DisplayName("The pinned Test BankID root is an anchor only when allow-test-root is set")
+    void pinnedTestRootIsAnAnchorOnlyWhenAllowed() {
+        assertThat(BankIdService.pinnedTrustAnchors(false))
+                .hasSize(1)
+                .noneMatch(a -> a.getTrustedCert().getSubjectX500Principal().getName()
+                        .contains("Test BankID Root CA v1 Test"));
+        assertThat(BankIdService.pinnedTrustAnchors(true))
+                .hasSize(2)
+                .anyMatch(a -> a.getTrustedCert().getSubjectX500Principal().getName()
+                        .contains("Test BankID Root CA v1 Test"));
+    }
 }
