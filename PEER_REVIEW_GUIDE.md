@@ -33,7 +33,7 @@ hsm carried **no code changes** in v1.2.0 relative to v1.0.0. (Superseded: the v
 
 **Is:**
 
-- A **reference implementation** of the HSM attestation verification procedure described in Article 1 §§4.1–4.2. Eight vendor-specific verifiers (Securosys, Yubico, Azure Managed HSM, Google Cloud HSM, Marvell LiquidSecurity, Thales Luna, Crypto4A QASM, Fortanix DSM) plug into a common `HsmAttestationVerifier` interface. Each anchors its chain at a pinned vendor root: PKIX for Securosys, Yubico and Fortanix, issuer name and signature for the three Marvell chains, Thales Luna and Crypto4A, as the vendors' tools check them.
+- A **reference implementation** of the HSM attestation verification procedure described in Article 1 §§4.1–4.2. Nine vendor-specific verifiers (Securosys, Yubico, Azure Managed HSM, Google Cloud HSM, Marvell LiquidSecurity, Thales Luna, Crypto4A QASM, Fortanix DSM, Entrust nShield) plug into a common `HsmAttestationVerifier` interface. Each anchors its chain at a pinned vendor root: PKIX for Securosys, Yubico and Fortanix, issuer name and signature for the three Marvell chains, Thales Luna and Crypto4A, and the warrant's signatures from the pinned KWARN-1 key for Entrust nShield, as the vendors' tools check them.
 - A **demonstrator** of the end-to-end certificate-issuance flow: a CSR + attestation evidence → `AttestationService.verifyAndIssue()` → BankID-authenticated signatory → pluggable signatory-rights check → `IssuanceClient.issue()` (reference: `MockIssuanceClient`).
 - **Deterministically reproducible**. The PKIX-based test suite builds a throwaway CA with `TestPki` and asserts that non-pinned chains are rejected — no network, no mocks, no vendor hardware required.
 - **MIT-licensed**.

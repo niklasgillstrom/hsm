@@ -8,7 +8,8 @@ public enum HsmVendor {
     MARVELL("Marvell", "LiquidSecurity HSM"),
     THALES("Thales", "Luna HSM"),
     CRYPTO4A("Crypto4A", "QASM"),
-    FORTANIX("Fortanix", "DSM");
+    FORTANIX("Fortanix", "DSM"),
+    ENTRUST("Entrust", "nShield");
     
     private final String vendorName;
     private final String productName;

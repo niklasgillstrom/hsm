@@ -259,14 +259,15 @@ Steps 2–4 reflect Swish's current operational integration (BankID for signator
 
 | Vendor | Status | Request format |
 |--------|--------|----------------|
-| Securosys Primus | ✅ | `attestationData` (XML), `attestationSignature`, `attestationCertChain` |
-| Yubico YubiHSM 2 | ✅ | `attestationCertChain` |
+| Securosys Primus | ✅ | `attestationData` (XML), `attestationSignature`, `attestationCertChain`. Verified against the reference Primus HSM's attestation of an RSA-4096 key (`src/test/resources/fixtures/securosys`, `ReferenceDeviceAttestationTest`). |
+| Yubico YubiHSM 2 | ✅ | `attestationCertChain`. Verified against the reference YubiHSM 2's attestation of an RSA-4096 key (`src/test/resources/fixtures/yubico`, `ReferenceDeviceAttestationTest`). |
 | Azure Managed HSM | ⚠️ | `attestationData`: the JSON from `az keyvault key get-attestation` (whole, or its `attributes` or `attributes.attestation` object). Marvell chain under the pinned Marvell roots, both attestations signed by the partition certificate, key attributes and RSA modulus read from the signed blobs (`MarvellAttestation`). Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
 | Google Cloud HSM | ⚠️ | `attestationData` (base64 of `attestation.dat`, gzip or decompressed), `attestationCertChain`. Marvell chain and Google owner chain (Hawksbill Root v1 prod), both pinned; key attributes and RSA modulus read from the signed blob. Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
 | Marvell LiquidSecurity | ⚠️ | `attestationData` (base64 of `attest.dat`, produced when the key is generated), `attestationCertChain` (partition and card certificates). Marvell chain under the pinned Marvell roots, key attributes and RSA modulus or EKCV read from the signed blob. Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
 | Thales Luna | ✅ | `attestationData` (base64 of the DER Public Key Confirmation from `cmu getpkc`). PKC chain (Proof of Origin, Device Authentication, Hardware Origin, Mfg Integrity) under the pinned Chrysalis-ITS Root key; the Proof of Origin certificate's key must be the CSR key. Verified against Thales's own test vector (`src/test/resources/vendor-fixtures/thales-luna`). |
 | Crypto4A QASM | ✅ | `attestationData` (the QASM attestation message, base64 of DER or the PEM `ATTESTATION MESSAGE` block). Every signature block (ECDSA P-384 and HSS) must verify over the claims and chain to the pinned C4A_RCA key; the key's `key-spki` must be the CSR key and the same object must carry private-key class, `key-is-confined`, `key-is-hardware-generated` and `key-never-extracted`, plus `qasm-certified-production` and `attestation-keys-are-unique`. Verified against the PKI Consortium's published message (`src/test/resources/vendor-fixtures/crypto4a`). |
 | Fortanix DSM | ✅ | `attestationData` (the key attestation JSON from DSM, `key_attestation_<key UUID>.json`). Authority certificate by PKIX with Fortanix's attestation policy under the pinned Fortanix root at the statement's signing time; the statement must be signed by it, attest the CSR key and carry `fortanixKeyGeneratedInDSM` and `fortanixKeyNeverExportable`. Verified against the sample in Fortanix's documentation (`src/test/resources/vendor-fixtures/fortanix`). |
+| Entrust nShield | ✅ | `attestationData` (the key attestation bundle JSON from `nfkmattest`). Warrant from the pinned KWARN-1 key to the module's KLF2 and ESN; module state signed by KLF2; security officer's key and module key bound by the world binding certificate; key generation certificate signed by the module's KML, for the CSR key; the generation-time ACL must not make the key recoverable (no security-officer-certified group, no recovery blob) nor allow export or key-wrapping permissions, and working blobs must be under the module key. Verified against Entrust's two example bundles (`src/test/resources/vendor-fixtures/nshield`): the softcard-protected key verifies, the recoverable one is refused. |
 | AWS CloudHSM | ❌ | Lacks per-key attestation |
 
 
@@ -429,6 +430,30 @@ Request:
 {
   "hsmVendor": "FORTANIX",
   "attestationData": "<key_attestation_<key UUID>.json>",
+  ...
+}
+```
+
+### Entrust nShield
+
+An nShield key attestation bundle (`nfkmattest`) carries the module's
+warrant, issued by Entrust under KWARN-1, the module state certificate, the
+security world's binding certificates and the key generation certificate,
+which records the key's generation-time ACL. The ACL decides whether the
+key is recoverable: a permission group certified by the security officer's
+key ("trump ops") or a MakeArchiveBlob action lets the Administrator Card
+Set holders load and use the key without its own protection, so such a key
+is refused (`NSHIELD_KEY_RECOVERABLE`). The verifier accepts both
+`ModuleInformation` and `FieldUpgradeModuleInformation` warrants (the
+latter, which Entrust's examples carry, depends on legacy DSA-1024
+signatures inside the module) and reports which one it saw. Key hashes are
+computed for RSA, DSA and ECDSA P-256 keys; other keys are refused.
+
+Request:
+```json
+{
+  "hsmVendor": "ENTRUST",
+  "attestationData": "<the bundle JSON>",
   ...
 }
 ```

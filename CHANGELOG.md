@@ -170,6 +170,28 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   happens at the signing time, as Fortanix prescribes for its one-month
   authority certificates. The sample in Fortanix's documentation verifies.
   Tests: `FortanixVerifierTest` (7; all twelve guard mutants are killed).
+- **Entrust nShield as a ninth vendor (`ENTRUST`).** `NShieldVerifier`
+  follows Entrust's "Verifying an attestation bundle": the warrant (DDDS)
+  from the pinned KWARN-1 key through Delegation certificates to the
+  module's KLF2 and ESN (WV1); the module state certificate under KLF2 with
+  the warrant's ESN, the KML, HKNSO and the module key list, `knsopub`
+  hashing to HKNSO and `hkm` in the list (MSCV1-5); the world binding
+  certificate (plain or FIPS) under `knsopub` before `hkm` is trusted, and
+  CertKREaKRAbKNSO when present (WBCV1-5); the key generation certificate
+  under KML whose key hash is that of `pubkeydata` (KGCV1-2); the ACL read
+  in full and refused on anything unrecognised, with Entrust's forbidden
+  permissions refused, working blobs required under the trusted module key,
+  and a security-officer-certified group or MakeArchiveBlob action marking
+  the key recoverable, which is refused (the Administrator Card Set could
+  then use the key: the human factor of Art. 9(3)(d)); `pubkeydata` must be
+  the CSR key (CSRL1). Entrust's softcard example verifies; its
+  module-protected example is refused as recoverable and for UseAsBlobKey.
+  Tests: `NShieldVerifierTest` (25, with Entrust's bundles and synthetic
+  bundles from test keys, including the FIPS world binding, an ECDSA KML
+  and an RSA-4096 key; all 73 guard mutants are killed).
+- **Reference-device attestations as tests.** The YubiHSM 2 and Primus
+  attestations of RSA-4096 keys that gatekeeper's tests use are now also
+  verified here (`ReferenceDeviceAttestationTest`).
 
 ## 1.5.0
 

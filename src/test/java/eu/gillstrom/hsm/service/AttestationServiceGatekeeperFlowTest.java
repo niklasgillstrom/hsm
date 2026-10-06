@@ -178,6 +178,7 @@ class AttestationServiceGatekeeperFlowTest {
                 new eu.gillstrom.hsm.verification.ThalesLunaVerifier(),
                 new eu.gillstrom.hsm.verification.Crypto4AVerifier(),
                 new eu.gillstrom.hsm.verification.FortanixVerifier(),
+                new eu.gillstrom.hsm.verification.NShieldVerifier(),
                 (personalNumber, organisationNumber, swishNumber) ->
                         SignatoryRightsVerifier.Result.authorised("test"),
                 gatekeeper,

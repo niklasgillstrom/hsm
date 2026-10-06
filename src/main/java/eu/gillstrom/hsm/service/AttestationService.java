@@ -31,6 +31,7 @@ import eu.gillstrom.hsm.verification.MarvellHsmVerifier;
 import eu.gillstrom.hsm.verification.ThalesLunaVerifier;
 import eu.gillstrom.hsm.verification.Crypto4AVerifier;
 import eu.gillstrom.hsm.verification.FortanixVerifier;
+import eu.gillstrom.hsm.verification.NShieldVerifier;
 import eu.gillstrom.hsm.verification.SecurosysVerifier;
 import eu.gillstrom.hsm.verification.YubicoVerifier;
 
@@ -69,6 +70,7 @@ public class AttestationService {
     private final ThalesLunaVerifier thalesVerifier;
     private final Crypto4AVerifier crypto4aVerifier;
     private final FortanixVerifier fortanixVerifier;
+    private final NShieldVerifier nshieldVerifier;
     private final SignatoryRightsVerifier signatoryRightsVerifier;
     private final GatekeeperClient gatekeeperClient;
     private final ReceiptVerifier receiptVerifier;
@@ -86,6 +88,7 @@ public class AttestationService {
             ThalesLunaVerifier thalesVerifier,
             Crypto4AVerifier crypto4aVerifier,
             FortanixVerifier fortanixVerifier,
+            NShieldVerifier nshieldVerifier,
             SignatoryRightsVerifier signatoryRightsVerifier,
             GatekeeperClient gatekeeperClient,
             ReceiptVerifier receiptVerifier,
@@ -102,6 +105,7 @@ public class AttestationService {
         this.thalesVerifier = thalesVerifier;
         this.crypto4aVerifier = crypto4aVerifier;
         this.fortanixVerifier = fortanixVerifier;
+        this.nshieldVerifier = nshieldVerifier;
         this.signatoryRightsVerifier = signatoryRightsVerifier;
         this.gatekeeperClient = gatekeeperClient;
         this.receiptVerifier = receiptVerifier;
@@ -649,6 +653,21 @@ public class AttestationService {
                             attestedFingerprint = csrFingerprint;
                         }
                     }
+                    case ENTRUST -> {
+                        var result = verifyNShield(request, csrPublicKey);
+                        publicKeyMatch = result.isPublicKeyMatch();
+                        attestationChainValid = result.isChainValid();
+                        hsmSerial = result.getEsn();
+                        hsmModel = "Entrust nShield";
+                        keyOrigin = result.getKeyOrigin();
+                        keyExportable = result.isExportable();
+                        if (!result.isValid()) {
+                            errors.addAll(result.getErrors());
+                        }
+                        if (result.isPublicKeyMatch()) {
+                            attestedFingerprint = csrFingerprint;
+                        }
+                    }
                     default -> errors.add("Vendor " + vendor + " not yet implemented");
                 }
             }
@@ -809,6 +828,18 @@ public class AttestationService {
         }
 
         return fortanixVerifier.verifyFortanixAttestation(request.getAttestationData(), csrPublicKey);
+    }
+
+    private NShieldVerifier.NShieldResult verifyNShield(
+            CertificateRequest request, PublicKey csrPublicKey) {
+
+        if (request.getAttestationData() == null || request.getAttestationData().isBlank()) {
+            var result = new NShieldVerifier.NShieldResult();
+            result.addError("attestationData (the nShield key attestation bundle JSON) is required for Entrust");
+            return result;
+        }
+
+        return nshieldVerifier.verifyNShieldAttestation(request.getAttestationData(), csrPublicKey);
     }
 
     private HsmVendor detectVendor(String specified) {
