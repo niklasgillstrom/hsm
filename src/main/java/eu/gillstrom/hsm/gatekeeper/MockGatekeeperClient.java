@@ -177,13 +177,13 @@ public class MockGatekeeperClient implements GatekeeperClient {
         String processedAt = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
 
         if (expected == null) {
-            return IssuanceConfirmResponse.builder()
+            return signed(IssuanceConfirmResponse.builder()
                     .verificationId(request.getVerificationId())
                     .loopClosed(false)
                     .registryStatus(IssuanceConfirmResponse.RegistryStatus.ANOMALY_UNKNOWN_VERIFICATION)
                     .processedTimestamp(processedAt)
                     .anomalies(List.of("verificationId not found in mock approval registry"))
-                    .build();
+                    .build());
         }
 
         // Step-7 replay binding: nonce must match the one bound at verify time.
@@ -200,7 +200,7 @@ public class MockGatekeeperClient implements GatekeeperClient {
         }
 
         if (!request.isIssued()) {
-            return IssuanceConfirmResponse.builder()
+            return signed(IssuanceConfirmResponse.builder()
                     .verificationId(request.getVerificationId())
                     .loopClosed(true)
                     .publicKeyMatch(null)
@@ -208,13 +208,13 @@ public class MockGatekeeperClient implements GatekeeperClient {
                     .registryStatus(IssuanceConfirmResponse.RegistryStatus.VERIFIED_NOT_ISSUED)
                     .processedTimestamp(processedAt)
                     .anomalies(Collections.emptyList())
-                    .build();
+                    .build());
         }
 
         try {
             String actual = fingerprintOfCertificatePublicKey(request.getSigningCertificatePem());
             boolean match = expected.equals(actual);
-            return IssuanceConfirmResponse.builder()
+            return signed(IssuanceConfirmResponse.builder()
                     .verificationId(request.getVerificationId())
                     .loopClosed(match)
                     .publicKeyMatch(match)
@@ -226,10 +226,27 @@ public class MockGatekeeperClient implements GatekeeperClient {
                     .processedTimestamp(processedAt)
                     .anomalies(match ? Collections.emptyList()
                             : List.of("public key in issued certificate does not match attested public key"))
-                    .build();
+                    .build());
         } catch (Exception e) {
             throw new GatekeeperException(
                     "Mock gatekeeper confirm failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Sign a confirmation response with the mock's receipt key, as the real
+     * gatekeeper does from 1.6.0 (see {@link ConfirmationCanonicalizer}).
+     */
+    private IssuanceConfirmResponse signed(IssuanceConfirmResponse response) {
+        try {
+            Signature sig = Signature.getInstance("SHA256withRSA");
+            sig.initSign(keyPair.getPrivate());
+            sig.update(ConfirmationCanonicalizer.canonicalize(response));
+            response.setSignature(java.util.Base64.getEncoder().encodeToString(sig.sign()));
+            response.setSigningCertificate(signingCertificatePem);
+            return response;
+        } catch (Exception e) {
+            throw new GatekeeperException("Mock gatekeeper could not sign confirm response: " + e.getMessage(), e);
         }
     }
 

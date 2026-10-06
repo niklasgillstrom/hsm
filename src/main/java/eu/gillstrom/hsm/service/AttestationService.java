@@ -215,7 +215,8 @@ public class AttestationService {
         // A confirm response that arrives without exception is not by itself a
         // closed loop. It has to be the confirm for this verification, and it
         // has to say the registry reached the non-anomalous issued state.
-        String confirmAnomaly = confirmAnomaly(verifyReceipt, confirmResponse);
+        String confirmAnomaly = confirmAnomaly(verifyReceipt, confirmResponse,
+                local.getCsrPublicKeyFingerprint());
         if (confirmAnomaly != null) {
             log.warn("Gatekeeper confirm did not close the supervisory loop "
                     + "(verificationId={}, issuanceId={}): {}",
@@ -234,10 +235,16 @@ public class AttestationService {
      *         {@code VERIFIED_ISSUED_AND_CONFIRMED} stage: the certificate
      *         exists but the registry entry that legitimises it does not.
      */
-    private static String confirmAnomaly(VerifyResponse verifyReceipt,
-            IssuanceConfirmResponse confirmResponse) {
+    private String confirmAnomaly(VerifyResponse verifyReceipt,
+            IssuanceConfirmResponse confirmResponse, String csrFingerprint) {
         if (confirmResponse == null) {
             return "gatekeeper returned no confirm response";
+        }
+        // The response must be signed by a trusted gatekeeper key, exactly as
+        // the receipt is. Unsigned, anyone able to answer the confirm call
+        // could report the loop as closed.
+        if (!receiptVerifier.verifyConfirmation(confirmResponse)) {
+            return "confirm response signature did not verify against a trusted gatekeeper key";
         }
         String expectedId = verifyReceipt.getVerificationId();
         String actualId = confirmResponse.getVerificationId();
@@ -259,8 +266,15 @@ public class AttestationService {
         if (!confirmResponse.isLoopClosed()) {
             return "gatekeeper reported loopClosed=false";
         }
-        if (confirmResponse.getPublicKeyMatch() != null && !confirmResponse.getPublicKeyMatch()) {
-            return "gatekeeper reported publicKeyMatch=false for the issued certificate";
+        // For an issued certificate the match must be stated, and the key the
+        // gatekeeper read from the certificate must be the key of this CSR.
+        if (!Boolean.TRUE.equals(confirmResponse.getPublicKeyMatch())) {
+            return "gatekeeper did not report publicKeyMatch=true for the issued certificate (got "
+                    + confirmResponse.getPublicKeyMatch() + ")";
+        }
+        if (!Fingerprints.equal(confirmResponse.getActualPublicKeyFingerprint(), csrFingerprint)) {
+            return "gatekeeper confirmed public key " + confirmResponse.getActualPublicKeyFingerprint()
+                    + " but this request carries " + csrFingerprint;
         }
         return null;
     }

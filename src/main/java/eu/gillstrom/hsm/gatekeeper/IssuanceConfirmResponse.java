@@ -46,6 +46,16 @@ public class IssuanceConfirmResponse {
     private List<String> anomalies;
 
     /**
+     * Gatekeeper signature over {@link ConfirmationCanonicalizer#canonicalize},
+     * with the receipt key. Present from gatekeeper 1.6.0; verified by
+     * {@link ReceiptVerifier#verifyConfirmation}.
+     */
+    private String signature;
+
+    /** PEM-encoded gatekeeper signing certificate, as on the receipt. */
+    private String signingCertificate;
+
+    /**
      * Approval-registry states. Anything starting with {@code ANOMALY_} is a
      * supervisory concern that should be followed up by the operating NCA.
      */
@@ -61,6 +71,8 @@ public class IssuanceConfirmResponse {
         /** Public key in issued certificate does not match the attested key. */
         ANOMALY_PUBLIC_KEY_MISMATCH,
         /** Confirmation received for a verificationId not in the registry. */
-        ANOMALY_UNKNOWN_VERIFICATION
+        ANOMALY_UNKNOWN_VERIFICATION,
+        /** Mirrors the gatekeeper's status for a confirm whose nonce did not match. */
+        ANOMALY_NONCE_MISMATCH
     }
 }

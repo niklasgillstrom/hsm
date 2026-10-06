@@ -54,6 +54,7 @@ class AttestationServiceGatekeeperFlowTest {
     private BankIdFixture fx;
     private GatekeeperKeyRegistry registry;
     private RecordingGatekeeperClient gatekeeper;
+    private MockGatekeeperClient mock;
     private MockIssuanceClient issuance;
 
     static boolean yubicoFixturePresent() {
@@ -64,7 +65,7 @@ class AttestationServiceGatekeeperFlowTest {
     void setUp() throws Exception {
         fx = new BankIdFixture();
         registry = new GatekeeperKeyRegistry("");
-        MockGatekeeperClient mock = new MockGatekeeperClient(registry);
+        mock = new MockGatekeeperClient(registry);
         mock.init();
         gatekeeper = new RecordingGatekeeperClient(mock);
         issuance = new MockIssuanceClient();
@@ -105,6 +106,54 @@ class AttestationServiceGatekeeperFlowTest {
         assertThat(new ReceiptVerifier(registry).verify(rebuilt))
                 .as("the audit record must carry every signed receipt field")
                 .isTrue();
+    }
+
+    @Test
+    @EnabledIf("yubicoFixturePresent")
+    void unsignedConfirmIsNotAClosedLoop() throws Exception {
+        // Whoever can answer the confirm call returns a well-formed
+        // loopClosed=true envelope without the gatekeeper's signature.
+        gatekeeper.confirmOverride = req -> IssuanceConfirmResponse.builder()
+                .verificationId(req.getVerificationId())
+                .loopClosed(true)
+                .publicKeyMatch(true)
+                .actualPublicKeyFingerprint(gatekeeper.lastVerifiedFingerprint)
+                .registryStatus(IssuanceConfirmResponse.RegistryStatus.VERIFIED_AND_ISSUED)
+                .build();
+
+        IssuanceResponse r = service("SE").verifyAndIssue(signingRequest());
+
+        assertThat(r.getStage()).isEqualTo(IssuanceResponse.Stage.ISSUED_BUT_CONFIRM_NOT_CLOSED);
+        assertThat(r.getErrors()).anyMatch(e -> e.contains("signature did not verify"));
+    }
+
+    @Test
+    @EnabledIf("yubicoFixturePresent")
+    void signedConfirmForAnotherKeyIsNotAClosedLoop() throws Exception {
+        // A genuinely signed confirm that names a different public key than
+        // the CSR carries does not close this request's loop.
+        gatekeeper.confirmOverride = req -> {
+            IssuanceConfirmResponse c = mock.confirm(req);
+            c.setActualPublicKeyFingerprint("00:11:22");
+            resign(c);
+            return c;
+        };
+
+        IssuanceResponse r = service("SE").verifyAndIssue(signingRequest());
+
+        assertThat(r.getStage()).isEqualTo(IssuanceResponse.Stage.ISSUED_BUT_CONFIRM_NOT_CLOSED);
+        assertThat(r.getErrors()).anyMatch(e -> e.contains("but this request carries"));
+    }
+
+    private void resign(IssuanceConfirmResponse c) {
+        try {
+            java.security.Signature sig = java.security.Signature.getInstance("SHA256withRSA");
+            sig.initSign(mock.getKeyPair().getPrivate());
+            sig.update(eu.gillstrom.hsm.gatekeeper.ConfirmationCanonicalizer.canonicalize(c));
+            c.setSignature(java.util.Base64.getEncoder().encodeToString(sig.sign()));
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @Test
@@ -162,6 +211,8 @@ class AttestationServiceGatekeeperFlowTest {
         private final GatekeeperClient delegate;
         private VerifyRequest lastVerify;
         private IssuanceConfirmRequest lastConfirm;
+        private String lastVerifiedFingerprint;
+        private java.util.function.Function<IssuanceConfirmRequest, IssuanceConfirmResponse> confirmOverride;
 
         RecordingGatekeeperClient(GatekeeperClient delegate) {
             this.delegate = delegate;
@@ -170,13 +221,15 @@ class AttestationServiceGatekeeperFlowTest {
         @Override
         public VerifyResponse verify(VerifyRequest request) {
             lastVerify = request;
-            return delegate.verify(request);
+            VerifyResponse r = delegate.verify(request);
+            lastVerifiedFingerprint = r.getPublicKeyFingerprint();
+            return r;
         }
 
         @Override
         public IssuanceConfirmResponse confirm(IssuanceConfirmRequest request) {
             lastConfirm = request;
-            return delegate.confirm(request);
+            return confirmOverride != null ? confirmOverride.apply(request) : delegate.confirm(request);
         }
     }
 }

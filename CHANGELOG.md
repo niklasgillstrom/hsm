@@ -57,6 +57,23 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   and two in `AttestationServiceTransportTest`. The existing service tests
   signed "Jag godkanner avtalet"; they now sign a mandate text naming the
   organisation and Swish number.
+- **The confirm response is verified.** Its integrity rested on TLS alone:
+  any party able to answer the confirm call could return `loopClosed=true`
+  with the right `verificationId`, and the issuance was recorded as
+  `VERIFIED_ISSUED_AND_CONFIRMED`. A null `publicKeyMatch` was accepted for an
+  issued certificate, and the key the gatekeeper confirmed was never compared
+  with the CSR. Gatekeeper 1.6.0 signs the response (`ConfirmationCanonicalizer`,
+  form `c1`, golden literal shared in `ConfirmationCanonicalizerGoldenBytesTest`);
+  `ReceiptVerifier.verifyConfirmation` checks it against the trusted gatekeeper
+  keys, and `AttestationService` now also requires `publicKeyMatch=true` and
+  the confirmed `actualPublicKeyFingerprint` to equal the CSR's. **Requires
+  gatekeeper 1.6.0**: an unsigned response from an older gatekeeper now ends
+  in `ISSUED_BUT_CONFIRM_NOT_CLOSED`. `MockGatekeeperClient` signs its
+  responses. `IssuanceConfirmResponse.RegistryStatus` gains
+  `ANOMALY_NONCE_MISMATCH`, which the gatekeeper already used. Tests: the
+  golden test (2) and two in `AttestationServiceGatekeeperFlowTest`
+  (`unsignedConfirmIsNotAClosedLoop`, `signedConfirmForAnotherKeyIsNotAClosedLoop`),
+  both failing against the previous check.
 
 ## 1.5.0
 

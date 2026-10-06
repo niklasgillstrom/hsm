@@ -216,7 +216,7 @@
 
 ### Residual risks
 
-- **Unsigned confirm response** *(v1.5.0)*. The confirm *request* is bound to the verify step: the gatekeeper issues a single-use `confirmationNonce` with the receipt, the nonce is covered by the receipt signature (wire format `v2`), and `AttestationService` echoes it in the confirm, which the gatekeeper rejects on a mismatch. The confirm *response* carries no signature. Its integrity rests on the TLS channel alone, so an attacker able to terminate that channel could return a fabricated `loopClosed=true` envelope that echoes the right `verificationId`. The local checks detect a foreign or anomalous response, not a forged one; mTLS to the gatekeeper is the mitigation.
+- **Confirm response** *(v1.5.0; closed in 1.6.0)*. Until 1.6.0 the confirm *response* carried no signature, so an attacker able to terminate the TLS channel could return a fabricated `loopClosed=true` envelope that echoed the right `verificationId`, and the local checks detected a foreign or anomalous response but not a forged one. From 1.6.0 the gatekeeper signs the response with the receipt key over `ConfirmationCanonicalizer`'s `c1` form, `AttestationService` verifies it against `swish.gatekeeper.trusted-keys` exactly as it verifies the receipt, requires `publicKeyMatch=true`, and requires the confirmed `actualPublicKeyFingerprint` to be this request's CSR key. A response failing any of these is `ISSUED_BUT_CONFIRM_NOT_CLOSED`.
 - **Behaviour during partial-network outages.** A confirm-step failure that is purely transport-level (TCP reset, gateway 5xx) is indistinguishable at the client side from a substantive rejection. The deployer's runbook must default to revocation in any non-deterministic case.
 
 ---

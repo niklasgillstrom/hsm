@@ -59,28 +59,45 @@ public class ReceiptVerifier {
             log.warn("ReceiptVerifier: null receipt");
             return false;
         }
-        if (receipt.getSignature() == null || receipt.getSignature().isBlank()) {
-            log.warn("ReceiptVerifier: missing signature on verificationId={}",
-                    receipt.getVerificationId());
+        return verifySigned("receipt", receipt.getVerificationId(), receipt.getSignature(),
+                receipt.getSigningCertificate(), () -> ReceiptCanonicalizer.canonicalize(receipt));
+    }
+
+    /**
+     * Verify a Step-7 confirmation response the same way as a receipt: the
+     * advertised certificate's key must be registered, and the signature must
+     * verify over {@link ConfirmationCanonicalizer#canonicalize}. Before
+     * gatekeeper 1.6.0 the response was unsigned and its integrity rested on
+     * TLS alone.
+     */
+    public boolean verifyConfirmation(IssuanceConfirmResponse confirmation) {
+        if (confirmation == null) {
+            log.warn("ReceiptVerifier: null confirmation response");
             return false;
         }
-        if (receipt.getSigningCertificate() == null
-                || receipt.getSigningCertificate().isBlank()) {
-            log.warn("ReceiptVerifier: missing signingCertificate on verificationId={}",
-                    receipt.getVerificationId());
+        return verifySigned("confirmation", confirmation.getVerificationId(), confirmation.getSignature(),
+                confirmation.getSigningCertificate(), () -> ConfirmationCanonicalizer.canonicalize(confirmation));
+    }
+
+    private boolean verifySigned(String kind, String verificationId, String signatureBase64,
+            String signingCertificatePem, java.util.function.Supplier<byte[]> canonical) {
+        if (signatureBase64 == null || signatureBase64.isBlank()) {
+            log.warn("ReceiptVerifier: missing signature on {} verificationId={}", kind, verificationId);
+            return false;
+        }
+        if (signingCertificatePem == null || signingCertificatePem.isBlank()) {
+            log.warn("ReceiptVerifier: missing signingCertificate on {} verificationId={}", kind, verificationId);
             return false;
         }
 
-        // 1. Parse the signing certificate the receipt advertises.
+        // 1. Parse the signing certificate the message advertises.
         X509Certificate advertisedCert;
         try {
             CertificateFactory cf = CertificateFactory.getInstance("X.509");
             advertisedCert = (X509Certificate) cf.generateCertificate(
-                    new ByteArrayInputStream(
-                            receipt.getSigningCertificate().getBytes(StandardCharsets.UTF_8)));
+                    new ByteArrayInputStream(signingCertificatePem.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception e) {
-            log.warn("ReceiptVerifier: signingCertificate did not parse as X.509: {}",
-                    e.getMessage());
+            log.warn("ReceiptVerifier: signingCertificate did not parse as X.509: {}", e.getMessage());
             return false;
         }
 
@@ -88,38 +105,33 @@ public class ReceiptVerifier {
         String fp = GatekeeperKeyRegistry.fingerprintHex(advertisedCert.getPublicKey());
         Optional<X509Certificate> trusted = registry.findByFingerprint(fp);
         if (trusted.isEmpty()) {
-            log.warn("ReceiptVerifier: receipt advertises untrusted gatekeeper key {} "
-                    + "(verificationId={})", fp, receipt.getVerificationId());
+            log.warn("ReceiptVerifier: {} advertises untrusted gatekeeper key {} (verificationId={})",
+                    kind, fp, verificationId);
             return false;
         }
 
         // 3. The signature must verify over the canonical bytes.
-        byte[] canonical = ReceiptCanonicalizer.canonicalize(receipt);
         byte[] signatureBytes;
         try {
-            signatureBytes = Base64.getDecoder().decode(receipt.getSignature());
+            signatureBytes = Base64.getDecoder().decode(signatureBase64);
         } catch (IllegalArgumentException e) {
             log.warn("ReceiptVerifier: signature is not valid base64: {}", e.getMessage());
             return false;
         }
-
         try {
             PublicKey trustedKey = trusted.get().getPublicKey();
             Signature sig = Signature.getInstance(DEFAULT_SIGNATURE_ALGORITHM);
             sig.initVerify(trustedKey);
-            sig.update(canonical);
+            sig.update(canonical.get());
             if (!sig.verify(signatureBytes)) {
-                log.warn("ReceiptVerifier: signature did not verify under registered "
-                        + "gatekeeper key {} (verificationId={})", fp,
-                        receipt.getVerificationId());
+                log.warn("ReceiptVerifier: {} signature did not verify under registered gatekeeper key {} "
+                        + "(verificationId={})", kind, fp, verificationId);
                 return false;
             }
         } catch (Exception e) {
-            log.warn("ReceiptVerifier: signature verification raised exception: {}",
-                    e.getMessage());
+            log.warn("ReceiptVerifier: {} signature verification raised exception: {}", kind, e.getMessage());
             return false;
         }
-
         return true;
     }
 }
