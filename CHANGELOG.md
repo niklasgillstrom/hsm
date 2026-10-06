@@ -35,6 +35,16 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   `AttestationServiceGatekeeperFlowTest.retainedReceiptReverifiesFromTheAuditRecord`,
   all three failing before the change. Retention itself is still the
   deployer's: nothing in this repository persists the `IssuanceResponse`.
+- **Key and CSR signature-algorithm policy.** No key size, curve or
+  algorithm was checked: RSA-512, RSA-1024, secp192r1 and a CSR signed with
+  MD5withRSA were all issued for. `KeyPolicy` now refuses any key not in
+  `swish.key-policy.allowed-keys` (default `RSA-4096`) and any CSR signature
+  algorithm not in `swish.key-policy.allowed-csr-signature-algorithms`
+  (default SHA-256, SHA-384 or SHA-512 with RSA), with `KEY_POLICY_VIOLATION`.
+  Both real fixtures (RSA-4096, `sha256WithRSAEncryption`) pass the default.
+  Tests: `KeyPolicyTest` (7) and
+  `AttestationServiceTransportTest.defaultKeyPolicyRefusesRsa2048`. Tests that
+  use synthetic RSA-2048 keys name `RSA-2048` in their policy explicitly.
 
 ## 1.5.0
 

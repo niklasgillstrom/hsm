@@ -37,6 +37,13 @@ swish:
     # NCA's gatekeeper certificate(s).
     trusted-keys: ${SWISH_GATEKEEPER_TRUSTED_KEYS:}
 
+  # Keys and CSR signature algorithms a certificate request may use. Exact
+  # allow-lists; anything not named is refused with KEY_POLICY_VIOLATION.
+  # Keys: RSA-<bits> or EC-<curve> (SEC curve names, e.g. EC-secp384r1).
+  key-policy:
+    allowed-keys: ${SWISH_KEY_POLICY_ALLOWED_KEYS:RSA-4096}
+    allowed-csr-signature-algorithms: ${SWISH_KEY_POLICY_ALLOWED_CSR_SIGNATURE_ALGORITHMS:SHA256withRSA,SHA384withRSA,SHA512withRSA}
+
   issuance:
     # mock — issues a leaf certificate signed by an ephemeral in-process test
     #        CA. NOT for production; the only mode shipped in this reference repo.

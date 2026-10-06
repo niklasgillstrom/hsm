@@ -31,6 +31,10 @@ class AttestationServiceTransportTest {
     private static final String ORG = "5569743098";
     private static final String SWISH = "1231015932";
 
+    /** The synthetic keys in this test are RSA-2048; the key policy is tested in KeyPolicyTest. */
+    private static final KeyPolicy TEST_KEY_POLICY =
+            new KeyPolicy("RSA-2048", KeyPolicy.DEFAULT_ALLOWED_CSR_SIGNATURE_ALGORITHMS);
+
     private BankIdFixture fx;
     private MockIssuanceClient issuance;
 
@@ -78,6 +82,21 @@ class AttestationServiceTransportTest {
         assertThat(r.getConfirmResponse()).isNull();
     }
 
+    @Test
+    @DisplayName("The default key policy refuses an RSA-2048 TRANSPORT request")
+    void defaultKeyPolicyRefusesRsa2048() throws Exception {
+        AttestationService service = new AttestationService(
+                new BankIdService(fx.anchors()), new SecurosysVerifier(), new YubicoVerifier(),
+                new AzureHsmVerifier(), new GoogleCloudHsmVerifier(),
+                (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"),
+                null, null, issuance, KeyPolicy.defaults(), "SE");
+
+        IssuanceResponse r = service.verifyAndIssue(boundTransportRequest());
+
+        assertThat(r.isIssued()).isFalse();
+        assertThat(r.getErrors()).anyMatch(e -> e.startsWith("KEY_POLICY_VIOLATION"));
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private AttestationService service(SignatoryRightsVerifier signatoryRights) {
@@ -88,7 +107,7 @@ class AttestationServiceTransportTest {
                 new AzureHsmVerifier(),
                 new GoogleCloudHsmVerifier(),
                 signatoryRights,
-                null, null, issuance, "SE");
+                null, null, issuance, TEST_KEY_POLICY, "SE");
     }
 
     private CertificateRequest boundTransportRequest() throws Exception {

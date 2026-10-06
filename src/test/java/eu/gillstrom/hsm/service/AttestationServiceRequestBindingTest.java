@@ -41,6 +41,10 @@ class AttestationServiceRequestBindingTest {
     private static final String ORG = "5569743098";
     private static final String SWISH = "1231015932";
 
+    /** The synthetic keys in this test are RSA-2048; the key policy is tested in KeyPolicyTest. */
+    private static final KeyPolicy TEST_KEY_POLICY =
+            new KeyPolicy("RSA-2048", KeyPolicy.DEFAULT_ALLOWED_CSR_SIGNATURE_ALGORITHMS);
+
     private BankIdFixture fx;
     private AttestationService service;
 
@@ -54,7 +58,7 @@ class AttestationServiceRequestBindingTest {
                 new AzureHsmVerifier(),
                 new GoogleCloudHsmVerifier(),
                 (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"),
-                null, null, null, "SE");
+                null, null, null, TEST_KEY_POLICY, "SE");
     }
 
     @Test

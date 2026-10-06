@@ -123,6 +123,7 @@ class AttestationServiceGatekeeperFlowTest {
                 gatekeeper,
                 new ReceiptVerifier(registry),
                 issuance,
+                KeyPolicy.defaults(),
                 countryCode);
     }
 

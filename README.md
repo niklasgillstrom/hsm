@@ -195,6 +195,8 @@ The gatekeeper and issuance components are pluggable via `application.yaml` / en
 | `swish.gatekeeper.country-code` | `SE` | ISO 3166-1 alpha-2 of the operating NCA |
 | `swish.gatekeeper.timeout-ms` | `5000` | site policy |
 | `swish.gatekeeper.trusted-keys` | empty | newline- or comma-separated PEM certificates of authoritative gatekeeper signing keys, including retired keys still relevant for receipts within the DORA Article 28(6) 5-year retention window |
+| `swish.key-policy.allowed-keys` | `RSA-4096` | comma-separated allow-list of `RSA-<bits>` / `EC-<curve>` (SEC names, e.g. `EC-secp384r1`); any other key is refused with `KEY_POLICY_VIOLATION` |
+| `swish.key-policy.allowed-csr-signature-algorithms` | `SHA256withRSA,SHA384withRSA,SHA512withRSA` | comma-separated allow-list of JCA names for the CSR's own signature; SHA-1 and MD5 are refused |
 | `swish.issuance.mode` | `mock` | replace with custom `IssuanceClient` against the Getswish CA |
 | `swish.bankid.allow-test-root` | `false` (`true` in `application-dev.yaml`) | `false` — the `Test BankID Root CA v1 Test` anchor is trusted only when this is `true` |
 | `swish.issuance.mock.ca-keystore` / `-password` / `ca-alias` | empty | only for local runs: PKCS12 keystore holding the mock issuing CA, so a local gatekeeper can trust it; empty means a fresh CA per start-up |

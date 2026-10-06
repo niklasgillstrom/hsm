@@ -137,9 +137,15 @@ public final class TestPki {
      */
     public static String csrPem(KeyPair subjectKp, String subjectCn, PrivateKey signingKey)
             throws Exception {
+        return csrPem(subjectKp, subjectCn, signingKey, "SHA256withRSA");
+    }
+
+    /** As {@link #csrPem(KeyPair, String, PrivateKey)}, signed with {@code signatureAlgorithm}. */
+    public static String csrPem(KeyPair subjectKp, String subjectCn, PrivateKey signingKey,
+            String signatureAlgorithm) throws Exception {
         JcaPKCS10CertificationRequestBuilder b = new JcaPKCS10CertificationRequestBuilder(
                 new X500Name("CN=" + subjectCn), subjectKp.getPublic());
-        ContentSigner cs = new JcaContentSignerBuilder("SHA256withRSA").build(signingKey);
+        ContentSigner cs = new JcaContentSignerBuilder(signatureAlgorithm).build(signingKey);
         PKCS10CertificationRequest csr = b.build(cs);
         String b64 = Base64.getMimeEncoder(64, "\n".getBytes()).encodeToString(csr.getEncoded());
         return "-----BEGIN CERTIFICATE REQUEST-----\n" + b64

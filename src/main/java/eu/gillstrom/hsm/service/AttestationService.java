@@ -38,6 +38,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class AttestationService {
@@ -64,6 +65,7 @@ public class AttestationService {
     private final GatekeeperClient gatekeeperClient;
     private final ReceiptVerifier receiptVerifier;
     private final IssuanceClient issuanceClient;
+    private final KeyPolicy keyPolicy;
     private final String gatekeeperCountryCode;
 
     public AttestationService(BankIdService bankIdService,
@@ -75,6 +77,7 @@ public class AttestationService {
             GatekeeperClient gatekeeperClient,
             ReceiptVerifier receiptVerifier,
             IssuanceClient issuanceClient,
+            KeyPolicy keyPolicy,
             @Value("${swish.gatekeeper.country-code:SE}") String gatekeeperCountryCode) {
         this.bankIdService = bankIdService;
         this.securosysVerifier = securosysVerifier;
@@ -85,6 +88,7 @@ public class AttestationService {
         this.gatekeeperClient = gatekeeperClient;
         this.receiptVerifier = receiptVerifier;
         this.issuanceClient = issuanceClient;
+        this.keyPolicy = keyPolicy;
         this.gatekeeperCountryCode = gatekeeperCountryCode;
     }
 
@@ -402,6 +406,13 @@ public class AttestationService {
             }
             csrPublicKey = extractPublicKey(csr);
             keyAlgorithm = csrPublicKey.getAlgorithm();
+            // Key and signature-algorithm policy. Without it a CSR with an
+            // RSA-512 key, a weak curve or an MD5 signature was issued for.
+            Optional<String> policyViolation = keyPolicy.violation(csr, csrPublicKey);
+            if (policyViolation.isPresent()) {
+                errors.add("KEY_POLICY_VIOLATION: " + policyViolation.get());
+                return buildErrorResponse(errors, certType);
+            }
             // Hash the DER exactly as submitted rather than a re-encoding of
             // the parsed structure: the client computes its half of the binding
             // over the bytes it sends, and a re-encoding could in principle
