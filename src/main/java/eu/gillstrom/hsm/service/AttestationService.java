@@ -30,6 +30,7 @@ import eu.gillstrom.hsm.verification.GoogleCloudHsmVerifier;
 import eu.gillstrom.hsm.verification.MarvellHsmVerifier;
 import eu.gillstrom.hsm.verification.ThalesLunaVerifier;
 import eu.gillstrom.hsm.verification.Crypto4AVerifier;
+import eu.gillstrom.hsm.verification.FortanixVerifier;
 import eu.gillstrom.hsm.verification.SecurosysVerifier;
 import eu.gillstrom.hsm.verification.YubicoVerifier;
 
@@ -67,6 +68,7 @@ public class AttestationService {
     private final MarvellHsmVerifier marvellVerifier;
     private final ThalesLunaVerifier thalesVerifier;
     private final Crypto4AVerifier crypto4aVerifier;
+    private final FortanixVerifier fortanixVerifier;
     private final SignatoryRightsVerifier signatoryRightsVerifier;
     private final GatekeeperClient gatekeeperClient;
     private final ReceiptVerifier receiptVerifier;
@@ -83,6 +85,7 @@ public class AttestationService {
             MarvellHsmVerifier marvellVerifier,
             ThalesLunaVerifier thalesVerifier,
             Crypto4AVerifier crypto4aVerifier,
+            FortanixVerifier fortanixVerifier,
             SignatoryRightsVerifier signatoryRightsVerifier,
             GatekeeperClient gatekeeperClient,
             ReceiptVerifier receiptVerifier,
@@ -98,6 +101,7 @@ public class AttestationService {
         this.marvellVerifier = marvellVerifier;
         this.thalesVerifier = thalesVerifier;
         this.crypto4aVerifier = crypto4aVerifier;
+        this.fortanixVerifier = fortanixVerifier;
         this.signatoryRightsVerifier = signatoryRightsVerifier;
         this.gatekeeperClient = gatekeeperClient;
         this.receiptVerifier = receiptVerifier;
@@ -630,6 +634,21 @@ public class AttestationService {
                             attestedFingerprint = csrFingerprint;
                         }
                     }
+                    case FORTANIX -> {
+                        var result = verifyFortanix(request, csrPublicKey);
+                        publicKeyMatch = result.isPublicKeyMatch();
+                        attestationChainValid = result.isChainValid();
+                        hsmSerial = result.getKeyId();
+                        hsmModel = "Fortanix DSM";
+                        keyOrigin = result.getKeyOrigin();
+                        keyExportable = result.isExportable();
+                        if (!result.isValid()) {
+                            errors.addAll(result.getErrors());
+                        }
+                        if (result.isPublicKeyMatch()) {
+                            attestedFingerprint = csrFingerprint;
+                        }
+                    }
                     default -> errors.add("Vendor " + vendor + " not yet implemented");
                 }
             }
@@ -778,6 +797,18 @@ public class AttestationService {
         }
 
         return crypto4aVerifier.verifyCrypto4AAttestation(request.getAttestationData(), csrPublicKey);
+    }
+
+    private FortanixVerifier.FortanixResult verifyFortanix(
+            CertificateRequest request, PublicKey csrPublicKey) {
+
+        if (request.getAttestationData() == null || request.getAttestationData().isBlank()) {
+            var result = new FortanixVerifier.FortanixResult();
+            result.addError("attestationData (the DSM key attestation JSON) is required for Fortanix");
+            return result;
+        }
+
+        return fortanixVerifier.verifyFortanixAttestation(request.getAttestationData(), csrPublicKey);
     }
 
     private HsmVendor detectVendor(String specified) {

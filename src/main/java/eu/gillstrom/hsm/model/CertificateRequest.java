@@ -47,7 +47,7 @@ public class CertificateRequest {
     private CertificateType certificateType;
 
     // HSM Vendor - required for signing certificates
-    private String hsmVendor; // YUBICO, SECUROSYS, AZURE, GOOGLE, MARVELL, THALES, CRYPTO4A
+    private String hsmVendor; // YUBICO, SECUROSYS, AZURE, GOOGLE, MARVELL, THALES, CRYPTO4A, FORTANIX
 
     // === HSM Attestation Data (vendor-specific) ===
 

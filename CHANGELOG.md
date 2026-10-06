@@ -159,6 +159,17 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   Its OIDs (`1.3.6.1.4.1.39901.6.2.x`) match Crypto4A's specification; the
   PKI Consortium page lists them one level too deep. Tests:
   `Crypto4AVerifierTest` (10; all eleven guard mutants are killed).
+- **Fortanix DSM as an eighth vendor (`FORTANIX`).** `FortanixVerifier`
+  follows Fortanix's "Verifying Key Attestation Statements": the Key
+  Attestation Authority certificate by PKIX with Fortanix's attestation
+  policy to the pinned Fortanix root, its EKU and Key Usage; the statement
+  signed by the authority, naming it as issuer, with no unknown critical
+  extension and a signing time within the authority's validity and not in
+  the future; the statement's key must be the CSR key and carry
+  `fortanixKeyGeneratedInDSM` and `fortanixKeyNeverExportable`. Validation
+  happens at the signing time, as Fortanix prescribes for its one-month
+  authority certificates. The sample in Fortanix's documentation verifies.
+  Tests: `FortanixVerifierTest` (7; all twelve guard mutants are killed).
 
 ## 1.5.0
 

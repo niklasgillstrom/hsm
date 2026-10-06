@@ -177,6 +177,7 @@ class AttestationServiceGatekeeperFlowTest {
                 new eu.gillstrom.hsm.verification.MarvellHsmVerifier(),
                 new eu.gillstrom.hsm.verification.ThalesLunaVerifier(),
                 new eu.gillstrom.hsm.verification.Crypto4AVerifier(),
+                new eu.gillstrom.hsm.verification.FortanixVerifier(),
                 (personalNumber, organisationNumber, swishNumber) ->
                         SignatoryRightsVerifier.Result.authorised("test"),
                 gatekeeper,

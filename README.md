@@ -266,6 +266,7 @@ Steps 2–4 reflect Swish's current operational integration (BankID for signator
 | Marvell LiquidSecurity | ⚠️ | `attestationData` (base64 of `attest.dat`, produced when the key is generated), `attestationCertChain` (partition and card certificates). Marvell chain under the pinned Marvell roots, key attributes and RSA modulus or EKCV read from the signed blob. Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
 | Thales Luna | ✅ | `attestationData` (base64 of the DER Public Key Confirmation from `cmu getpkc`). PKC chain (Proof of Origin, Device Authentication, Hardware Origin, Mfg Integrity) under the pinned Chrysalis-ITS Root key; the Proof of Origin certificate's key must be the CSR key. Verified against Thales's own test vector (`src/test/resources/vendor-fixtures/thales-luna`). |
 | Crypto4A QASM | ✅ | `attestationData` (the QASM attestation message, base64 of DER or the PEM `ATTESTATION MESSAGE` block). Every signature block (ECDSA P-384 and HSS) must verify over the claims and chain to the pinned C4A_RCA key; the key's `key-spki` must be the CSR key and the same object must carry private-key class, `key-is-confined`, `key-is-hardware-generated` and `key-never-extracted`, plus `qasm-certified-production` and `attestation-keys-are-unique`. Verified against the PKI Consortium's published message (`src/test/resources/vendor-fixtures/crypto4a`). |
+| Fortanix DSM | ✅ | `attestationData` (the key attestation JSON from DSM, `key_attestation_<key UUID>.json`). Authority certificate by PKIX with Fortanix's attestation policy under the pinned Fortanix root at the statement's signing time; the statement must be signed by it, attest the CSR key and carry `fortanixKeyGeneratedInDSM` and `fortanixKeyNeverExportable`. Verified against the sample in Fortanix's documentation (`src/test/resources/vendor-fixtures/fortanix`). |
 | AWS CloudHSM | ❌ | Lacks per-key attestation |
 
 
@@ -409,6 +410,25 @@ Request:
 {
   "hsmVendor": "CRYPTO4A",
   "attestationData": "<message.pem, or base64 of its DER>",
+  ...
+}
+```
+
+### Fortanix DSM
+
+Fortanix DSM SaaS issues a key attestation statement, an X.509 structure
+signed by the cluster's Key Attestation Authority, with claims about the
+key: `fortanixKeyGeneratedInDSM` and `fortanixKeyNeverExportable` ("never
+exported from Fortanix DSM and may not be exported in the future. This
+prohibition also includes export in encrypted form"). Download it in the
+DSM UI (security object → DOWNLOAD CERTIFICATE) or with
+`POST /crypto/v1/keys/key_attestation`.
+
+Request:
+```json
+{
+  "hsmVendor": "FORTANIX",
+  "attestationData": "<key_attestation_<key UUID>.json>",
   ...
 }
 ```
