@@ -64,6 +64,7 @@ class AttestationServiceRequestBindingTest {
                 new YubicoVerifier(),
                 new AzureHsmVerifier(),
                 new GoogleCloudHsmVerifier(),
+                new eu.gillstrom.hsm.verification.MarvellHsmVerifier(),
                 (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"),
                 null, null, null, TEST_KEY_POLICY, TEST_CONSENT_POLICY, "SE");
     }

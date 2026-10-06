@@ -27,6 +27,7 @@ import eu.gillstrom.hsm.model.VerificationResponse.CertificateType;
 import eu.gillstrom.hsm.util.Fingerprints;
 import eu.gillstrom.hsm.verification.AzureHsmVerifier;
 import eu.gillstrom.hsm.verification.GoogleCloudHsmVerifier;
+import eu.gillstrom.hsm.verification.MarvellHsmVerifier;
 import eu.gillstrom.hsm.verification.SecurosysVerifier;
 import eu.gillstrom.hsm.verification.YubicoVerifier;
 
@@ -61,6 +62,7 @@ public class AttestationService {
     private final YubicoVerifier yubicoVerifier;
     private final AzureHsmVerifier azureVerifier;
     private final GoogleCloudHsmVerifier googleVerifier;
+    private final MarvellHsmVerifier marvellVerifier;
     private final SignatoryRightsVerifier signatoryRightsVerifier;
     private final GatekeeperClient gatekeeperClient;
     private final ReceiptVerifier receiptVerifier;
@@ -74,6 +76,7 @@ public class AttestationService {
             YubicoVerifier yubicoVerifier,
             AzureHsmVerifier azureVerifier,
             GoogleCloudHsmVerifier googleVerifier,
+            MarvellHsmVerifier marvellVerifier,
             SignatoryRightsVerifier signatoryRightsVerifier,
             GatekeeperClient gatekeeperClient,
             ReceiptVerifier receiptVerifier,
@@ -86,6 +89,7 @@ public class AttestationService {
         this.yubicoVerifier = yubicoVerifier;
         this.azureVerifier = azureVerifier;
         this.googleVerifier = googleVerifier;
+        this.marvellVerifier = marvellVerifier;
         this.signatoryRightsVerifier = signatoryRightsVerifier;
         this.gatekeeperClient = gatekeeperClient;
         this.receiptVerifier = receiptVerifier;
@@ -573,6 +577,21 @@ public class AttestationService {
                             attestedFingerprint = csrFingerprint;
                         }
                     }
+                    case MARVELL -> {
+                        var result = verifyMarvell(request, csrPublicKey);
+                        publicKeyMatch = result.isPublicKeyMatch();
+                        attestationChainValid = result.isChainValid();
+                        hsmSerial = result.getPartitionSerial();
+                        hsmModel = "Marvell LiquidSecurity";
+                        keyOrigin = result.getKeyOrigin();
+                        keyExportable = result.isExtractable();
+                        if (!result.isValid()) {
+                            errors.addAll(result.getErrors());
+                        }
+                        if (result.isPublicKeyMatch()) {
+                            attestedFingerprint = csrFingerprint;
+                        }
+                    }
                     default -> errors.add("Vendor " + vendor + " not yet implemented");
                 }
             }
@@ -679,6 +698,21 @@ public class AttestationService {
         }
 
         return googleVerifier.verifyGoogleAttestation(
+                request.getAttestationData(),
+                request.getAttestationCertChain(),
+                csrPublicKey);
+    }
+
+    private MarvellHsmVerifier.MarvellAttestationResult verifyMarvell(
+            CertificateRequest request, PublicKey csrPublicKey) {
+
+        if (request.getAttestationData() == null || request.getAttestationData().isBlank()) {
+            var result = new MarvellHsmVerifier.MarvellAttestationResult();
+            result.addError("attestationData (base64 of attest.dat) is required for Marvell LiquidSecurity");
+            return result;
+        }
+
+        return marvellVerifier.verifyMarvellAttestation(
                 request.getAttestationData(),
                 request.getAttestationCertChain(),
                 csrPublicKey);

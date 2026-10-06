@@ -15,7 +15,7 @@ The audience is a **systems / integration engineer** at the FE who has been aske
 | Component | Role | Production-trustable as-is? |
 | --- | --- | --- |
 | `verification/SecurosysVerifier`, `verification/YubicoVerifier` | Vendor-specific HSM attestation verifiers; pin real vendor roots; PKIX-validated chain + signature + non-extractability check | Yes |
-| `verification/AzureHsmVerifier`, `verification/GoogleCloudHsmVerifier`, `verification/MarvellAttestation` | Cloud-HSM verifiers; Marvell roots from Microsoft's validator, Google owner root | **No**: never valid until a real Azure / Google attestation confirms the Marvell format (`MARVELL_FORMAT_UNCONFIRMED`) |
+| `verification/AzureHsmVerifier`, `verification/GoogleCloudHsmVerifier`, `verification/MarvellAttestation`, `verification/MarvellHsmVerifier` | Marvell-based verifiers (Azure, Google, physical Marvell); Marvell roots from Microsoft's validator, Google owner root | **No**: never valid until a real Azure / Google / Marvell attestation confirms the Marvell format (`MARVELL_FORMAT_UNCONFIRMED`) |
 | `gatekeeper/GatekeeperClient` (interface) + `HttpGatekeeperClient` | The FE → NCA verify/confirm RPC, two-step protocol | Yes — `mode=http` against the NCA's published gatekeeper URL |
 | `gatekeeper/ReceiptVerifier`, `gatekeeper/ReceiptCanonicalizer` | Validates the gatekeeper-signed receipt against the canonical bytes the FE submitted | Yes |
 | `gatekeeper/GatekeeperKeyRegistry` | Trusted set of gatekeeper signing certificates | Yes — populate via `swish.gatekeeper.trusted-keys` |
@@ -24,7 +24,7 @@ The audience is a **systems / integration engineer** at the FE who has been aske
 | `service/SignatoryRightsVerifier` (interface) + `FailClosedSignatoryRightsVerifier` + `MockAgreementRegistrySignatoryRightsVerifier` | Validates that the BankID-signed mandate authorises the requesting TL | **No** for production — write a custom adapter against the FE's actual signatory-rights database |
 | `service/BankIdService` | BankID signature verification (operational precondition for issuance) | Reference structure — adapt to the FE's actual BankID provider integration |
 
-The four vendor verifiers, the gatekeeper-client + receipt-validation layer, and the verification-pipeline orchestration in `AttestationService` are usable directly. The CA, signatory-rights and BankID integrations are FE-specific and require adapter work.
+The five vendor verifiers, the gatekeeper-client + receipt-validation layer, and the verification-pipeline orchestration in `AttestationService` are usable directly. The CA, signatory-rights and BankID integrations are FE-specific and require adapter work.
 
 ---
 

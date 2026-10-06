@@ -263,6 +263,7 @@ Steps 2–4 reflect Swish's current operational integration (BankID for signator
 | Yubico YubiHSM 2 | ✅ | `attestationCertChain` |
 | Azure Managed HSM | ⚠️ | `attestationData`: the JSON from `az keyvault key get-attestation` (whole, or its `attributes` or `attributes.attestation` object). Marvell chain under the pinned Marvell roots, both attestations signed by the partition certificate, key attributes and RSA modulus read from the signed blobs (`MarvellAttestation`). Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
 | Google Cloud HSM | ⚠️ | `attestationData` (base64 of `attestation.dat`, gzip or decompressed), `attestationCertChain`. Marvell chain and Google owner chain (Hawksbill Root v1 prod), both pinned; key attributes and RSA modulus read from the signed blob. Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
+| Marvell LiquidSecurity | ⚠️ | `attestationData` (base64 of `attest.dat`, produced when the key is generated), `attestationCertChain` (partition and card certificates). Marvell chain under the pinned Marvell roots, key attributes and RSA modulus or EKCV read from the signed blob. Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
 | AWS CloudHSM | ❌ | Lacks per-key attestation |
 
 
@@ -349,6 +350,25 @@ Request:
   "hsmVendor": "GOOGLE",
   "attestationData": "<content from attestation.b64>",
   "attestationCertChain": ["<content from certs.pem>"],
+  ...
+}
+```
+
+### Marvell LiquidSecurity
+
+A physical Marvell LiquidSecurity HSM, the hardware behind Azure Managed HSM
+and Google Cloud HSM, signs a key attestation when the key is generated
+(Marvell: "When you create a key on a Marvell HSM, you can optionally request
+an attestation statement"). A financial entity that wants to show DORA
+Art. 9.3 d met requests it at generation and keeps `attest.dat` with the
+partition and card certificates.
+
+Request:
+```json
+{
+  "hsmVendor": "MARVELL",
+  "attestationData": "<base64 of attest.dat>",
+  "attestationCertChain": ["<partition certificate PEM>", "<card certificate PEM>"],
   ...
 }
 ```

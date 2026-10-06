@@ -174,6 +174,7 @@ class AttestationServiceGatekeeperFlowTest {
                 new YubicoVerifier(),
                 new AzureHsmVerifier(),
                 new GoogleCloudHsmVerifier(),
+                new eu.gillstrom.hsm.verification.MarvellHsmVerifier(),
                 (personalNumber, organisationNumber, swishNumber) ->
                         SignatoryRightsVerifier.Result.authorised("test"),
                 gatekeeper,

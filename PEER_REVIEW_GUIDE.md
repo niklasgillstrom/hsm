@@ -33,7 +33,7 @@ hsm carried **no code changes** in v1.2.0 relative to v1.0.0. (Superseded: the v
 
 **Is:**
 
-- A **reference implementation** of the HSM attestation verification procedure described in Article 1 §§4.1–4.2. Four vendor-specific verifiers (Securosys, Yubico, Azure Managed HSM, Google Cloud HSM) plug into a common `HsmAttestationVerifier` interface. Each anchors a PKIX `CertPathValidator` at a pinned vendor root CA.
+- A **reference implementation** of the HSM attestation verification procedure described in Article 1 §§4.1–4.2. Five vendor-specific verifiers (Securosys, Yubico, Azure Managed HSM, Google Cloud HSM, Marvell LiquidSecurity) plug into a common `HsmAttestationVerifier` interface. Each anchors its chain at a pinned vendor root: PKIX for Securosys and Yubico, issuer name and signature for the three Marvell chains, as the vendors' tools check them.
 - A **demonstrator** of the end-to-end certificate-issuance flow: a CSR + attestation evidence → `AttestationService.verifyAndIssue()` → BankID-authenticated signatory → pluggable signatory-rights check → `IssuanceClient.issue()` (reference: `MockIssuanceClient`).
 - **Deterministically reproducible**. The PKIX-based test suite builds a throwaway CA with `TestPki` and asserts that non-pinned chains are rejected — no network, no mocks, no vendor hardware required.
 - **MIT-licensed**.

@@ -129,6 +129,13 @@ Versions before 1.4.0 have no entry here; their history is recorded in
 - Tests: `MarvellAttestationTest` (12, one with Marvell's published example
   values), `AzureHsmVerifierTest` (6, replacing 2), `GoogleCloudHsmVerifierTest`
   (8, replacing 2).
+- **Physical Marvell LiquidSecurity HSMs as a fifth vendor (`MARVELL`).**
+  The hardware behind Azure and Google signs its own key attestation when a
+  key is generated. `MarvellHsmVerifier` checks the manufacturer chain
+  (pinned Marvell roots → card → partition), the signature and the same key
+  evidence as the cloud verifiers. Never valid until a real attestation
+  confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). Tests:
+  `MarvellHsmVerifierTest` (5).
   `AzureHsmVerifierTest.jwkNamingTheCsrKeyIsNotABinding` fails on 1.5.0.
 
 ## 1.5.0

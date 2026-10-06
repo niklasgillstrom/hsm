@@ -95,6 +95,7 @@ class AttestationServiceTransportTest {
         AttestationService service = new AttestationService(
                 new BankIdService(fx.anchors()), new SecurosysVerifier(), new YubicoVerifier(),
                 new AzureHsmVerifier(), new GoogleCloudHsmVerifier(),
+                new eu.gillstrom.hsm.verification.MarvellHsmVerifier(),
                 (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"),
                 null, null, issuance, KeyPolicy.defaults(), TEST_CONSENT_POLICY, "SE");
 
@@ -122,6 +123,7 @@ class AttestationServiceTransportTest {
         AttestationService service = new AttestationService(
                 new BankIdService(fx.anchors()), new SecurosysVerifier(), new YubicoVerifier(),
                 new AzureHsmVerifier(), new GoogleCloudHsmVerifier(),
+                new eu.gillstrom.hsm.verification.MarvellHsmVerifier(),
                 (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"),
                 null, null, issuance, TEST_KEY_POLICY, new BankIdConsentPolicy("5569641234"), "SE");
 
@@ -140,6 +142,7 @@ class AttestationServiceTransportTest {
                 new YubicoVerifier(),
                 new AzureHsmVerifier(),
                 new GoogleCloudHsmVerifier(),
+                new eu.gillstrom.hsm.verification.MarvellHsmVerifier(),
                 signatoryRights,
                 null, null, issuance, TEST_KEY_POLICY, TEST_CONSENT_POLICY, "SE");
     }
