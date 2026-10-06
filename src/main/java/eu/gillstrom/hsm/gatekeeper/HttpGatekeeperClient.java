@@ -6,7 +6,10 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.ssl.SslBundles;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -56,22 +59,61 @@ public class HttpGatekeeperClient implements GatekeeperClient {
     private final String countryCode;
     private final Duration timeout;
 
+    /** Bound on the response body quoted in an error message. */
+    static final int MAX_QUOTED_BODY = 512;
+
+    @Autowired
     public HttpGatekeeperClient(
             @Value("${swish.gatekeeper.url}") String url,
             @Value("${swish.gatekeeper.country-code:SE}") String countryCode,
-            @Value("${swish.gatekeeper.timeout-ms:5000}") long timeoutMs) {
+            @Value("${swish.gatekeeper.timeout-ms:5000}") long timeoutMs,
+            @Value("${swish.gatekeeper.allow-insecure-http:false}") boolean allowInsecureHttp,
+            @Value("${swish.gatekeeper.ssl-bundle:}") String sslBundle,
+            ObjectProvider<SslBundles> sslBundles) {
+        this(url, countryCode, timeoutMs, allowInsecureHttp, sslBundle, sslBundles.getIfAvailable());
+    }
+
+    /**
+     * @param allowInsecureHttp accept an {@code http://} URL (local
+     *     development only): the verify request carries the attestation and
+     *     the organisation number, and both calls carry the confirmation
+     *     nonce, which over plain HTTP anyone on the path can read
+     * @param sslBundle name of the Spring Boot SSL bundle with the trust
+     *     store for the gatekeeper's certificate and the key store for the
+     *     FE's client certificate (mTLS); blank uses the JVM defaults
+     */
+    HttpGatekeeperClient(String url, String countryCode, long timeoutMs, boolean allowInsecureHttp,
+            String sslBundle, SslBundles sslBundles) {
         if (url == null || url.isBlank()) {
             throw new IllegalArgumentException(
                     "swish.gatekeeper.url must be set when swish.gatekeeper.mode=http");
+        }
+        if (!url.trim().toLowerCase(java.util.Locale.ROOT).startsWith("https://")) {
+            if (!allowInsecureHttp) {
+                throw new IllegalArgumentException("swish.gatekeeper.url must use https:// (configured: '"
+                        + url + "'). Set swish.gatekeeper.allow-insecure-http=true for a local "
+                        + "development run only.");
+            }
+            log.warn("swish.gatekeeper.url is '{}' and swish.gatekeeper.allow-insecure-http=true: "
+                    + "gatekeeper traffic is unencrypted. This configuration MUST NOT be deployed.", url);
         }
         if (countryCode == null || countryCode.isBlank()) {
             throw new IllegalArgumentException(
                     "swish.gatekeeper.country-code must be a non-blank ISO 3166-1 alpha-2 code");
         }
-        this.base = URI.create(stripTrailingSlash(url));
+        this.base = URI.create(stripTrailingSlash(url.trim()));
         this.countryCode = countryCode;
         this.timeout = Duration.ofMillis(timeoutMs);
-        this.http = HttpClient.newBuilder().connectTimeout(this.timeout).build();
+        HttpClient.Builder builder = HttpClient.newBuilder().connectTimeout(this.timeout)
+                .followRedirects(HttpClient.Redirect.NEVER);
+        if (sslBundle != null && !sslBundle.isBlank()) {
+            if (sslBundles == null) {
+                throw new IllegalStateException("swish.gatekeeper.ssl-bundle is '" + sslBundle
+                        + "' but no SSL bundle registry is available");
+            }
+            builder.sslContext(sslBundles.getBundle(sslBundle.trim()).createSslContext());
+        }
+        this.http = builder.build();
         log.info("HttpGatekeeperClient configured: base={} countryCode={} timeout={}ms",
                 this.base, this.countryCode, timeoutMs);
     }
@@ -91,7 +133,7 @@ public class HttpGatekeeperClient implements GatekeeperClient {
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (resp.statusCode() != 200) {
                 throw new GatekeeperException(
-                        "Gatekeeper verify returned HTTP " + resp.statusCode() + ": " + resp.body());
+                        "Gatekeeper verify returned HTTP " + resp.statusCode() + ": " + quoted(resp.body()));
             }
             return MAPPER.readValue(resp.body(), VerifyResponse.class);
         } catch (GatekeeperException e) {
@@ -117,7 +159,7 @@ public class HttpGatekeeperClient implements GatekeeperClient {
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (resp.statusCode() != 200) {
                 throw new GatekeeperException(
-                        "Gatekeeper confirm returned HTTP " + resp.statusCode() + ": " + resp.body());
+                        "Gatekeeper confirm returned HTTP " + resp.statusCode() + ": " + quoted(resp.body()));
             }
             return MAPPER.readValue(resp.body(), IssuanceConfirmResponse.class);
         } catch (GatekeeperException e) {
@@ -126,6 +168,20 @@ public class HttpGatekeeperClient implements GatekeeperClient {
             throw new GatekeeperException(
                     "Gatekeeper confirm call failed: " + e.getMessage(), e);
         }
+    }
+
+    /** For tests. */
+    HttpClient httpClient() {
+        return http;
+    }
+
+    /** The start of a response body, without line breaks, for an error message. */
+    static String quoted(String body) {
+        if (body == null) {
+            return "";
+        }
+        String flat = body.replaceAll("[\\r\\n]+", " ");
+        return flat.length() <= MAX_QUOTED_BODY ? flat : flat.substring(0, MAX_QUOTED_BODY) + "…";
     }
 
     private static String stripTrailingSlash(String url) {

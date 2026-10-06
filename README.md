@@ -139,7 +139,7 @@ Phase 1 — Local verification (AttestationService.verifyAndIssue, local pre-che
       │   BankID XML-DSig + OCSP (with XXE-protected DocumentBuilder)
       │   Signatory rights (pluggable; default is fail-closed)
       │
-      ├─ invalid → IssuanceResponse{stage=LOCAL_VERIFICATION_FAILED}, no gatekeeper call
+      ├─ invalid → IssuanceResponse{stage=REJECTED_LOCAL_VERIFICATION}, no gatekeeper call
       │
       ▼
 Phase 2 — Gatekeeper.verify (GatekeeperClient.verify, supervisory cross-check)
@@ -148,9 +148,16 @@ Phase 2 — Gatekeeper.verify (GatekeeperClient.verify, supervisory cross-check)
       │   Gatekeeper signs the canonical bytes of VerifyResponse with its NCA key
       │   ReceiptVerifier checks signature against GatekeeperKeyRegistry
       │   Receipt's publicKeyFingerprint compared against the CSR's public key
+      │   Receipt must be within 5 minutes of now and echo the request's country,
+      │   supplier, key purpose and HSM vendor, with key properties of a compliant key
+      │   The BankID signature is consumed (one issuance per signature)
       │
-      ├─ non-compliant or signature invalid → stage=GATEKEEPER_REJECTED, no issuance
+      ├─ call failed → stage=REJECTED_GATEKEEPER_VERIFY_FAILED
+      ├─ compliant=false → stage=REJECTED_GATEKEEPER_NOT_COMPLIANT
+      ├─ signature invalid → stage=REJECTED_GATEKEEPER_RECEIPT_INVALID
       ├─ receipt approves a different key → stage=REJECTED_RECEIPT_KEY_MISMATCH
+      ├─ receipt is not this request's → stage=REJECTED_RECEIPT_MISMATCH
+      ├─ BankID signature already used → stage=REJECTED_BANKID_ALREADY_USED (confirm: not issued)
       │
       ▼
 Phase 3 — Issuance (IssuanceClient.issue, certificate produced)
@@ -158,7 +165,7 @@ Phase 3 — Issuance (IssuanceClient.issue, certificate produced)
       │   Production: replace with adapter against Getswish CA
       │   IssuedCertificate carries verifyReceiptId binding it to the VerifyResponse
       │
-      ├─ issuance failure → stage=ISSUANCE_FAILED, no confirm sent
+      ├─ issuance failure → stage=REJECTED_ISSUANCE_FAILED, confirm sent with issued=false
       │
       ▼
 Phase 4 — Gatekeeper.confirm (GatekeeperClient.confirm, supervisory closure)
@@ -191,7 +198,10 @@ The gatekeeper and issuance components are pluggable via `application.yaml` / en
 | Property | Reference default | Production value |
 | -------- | ----------------- | ---------------- |
 | `swish.gatekeeper.mode` | `fail-closed` | `http` |
-| `swish.gatekeeper.url` | unset (fail-closed) | NCA gatekeeper URL, e.g. `https://dora-api.fi.se/v1/attestation` |
+| `swish.gatekeeper.url` | unset (fail-closed) | NCA gatekeeper base URL, e.g. `https://dora-api.fi.se`; the client appends `/v1/attestation/{countryCode}/verify` and `/confirm`. Must be `https://` |
+| `swish.gatekeeper.allow-insecure-http` | `false` | `true` only for a local development run against a gatekeeper without TLS |
+| `swish.gatekeeper.ssl-bundle` | empty (JVM defaults) | name of a Spring Boot SSL bundle (`spring.ssl.bundle.*`) holding the trust store for the gatekeeper's certificate and the key store for the FE's mTLS client certificate |
+| `swish.gatekeeper.signature-algorithm` | `SHA256withRSA` | the JCA algorithm the gatekeeper signs receipts with (its `gatekeeper.signing.algorithm`); SHA-1 and MD5 are refused |
 | `swish.gatekeeper.country-code` | `SE` | ISO 3166-1 alpha-2 of the operating NCA |
 | `swish.gatekeeper.timeout-ms` | `5000` | site policy |
 | `swish.gatekeeper.trusted-keys` | empty | newline- or comma-separated PEM certificates of authoritative gatekeeper signing keys, including retired keys still relevant for receipts within the DORA Article 28(6) 5-year retention window |

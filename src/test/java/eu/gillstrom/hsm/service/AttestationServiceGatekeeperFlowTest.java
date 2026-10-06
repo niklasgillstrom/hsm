@@ -145,6 +145,62 @@ class AttestationServiceGatekeeperFlowTest {
         assertThat(r.getErrors()).anyMatch(e -> e.contains("but this request carries"));
     }
 
+    /** A genuinely signed receipt whose fields are changed before it is signed. */
+    private void tamperedReceipt(java.util.function.Consumer<VerifyResponse> change) {
+        gatekeeper.verifyOverride = r -> {
+            change.accept(r);
+            try {
+                java.security.Signature sig = java.security.Signature.getInstance("SHA256withRSA");
+                sig.initSign(mock.getKeyPair().getPrivate());
+                sig.update(eu.gillstrom.hsm.gatekeeper.ReceiptCanonicalizer.canonicalize(r));
+                r.setSignature(java.util.Base64.getEncoder().encodeToString(sig.sign()));
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+            return r;
+        };
+    }
+
+    @Test
+    @EnabledIf("yubicoFixturePresent")
+    void receiptFieldsMustMatchTheRequest() throws Exception {
+        java.util.Map<String, java.util.function.Consumer<VerifyResponse>> cases = new java.util.LinkedHashMap<>();
+        cases.put("countryCode", r -> r.setCountryCode("NO"));
+        cases.put("supplierIdentifier", r -> r.setSupplierIdentifier("5560000000"));
+        cases.put("keyPurpose", r -> r.setKeyPurpose("Swish TRANSPORT"));
+        cases.put("hsmVendor", r -> r.setHsmVendor("SECUROSYS"));
+        cases.put("verificationTimestamp", r -> r.setVerificationTimestamp(java.time.Instant.now().minusSeconds(6 * 60)));
+        cases.put("verificationTimestamp in the future", r -> r.setVerificationTimestamp(java.time.Instant.now().plusSeconds(6 * 60)));
+        cases.put("no verificationTimestamp", r -> r.setVerificationTimestamp(null));
+        cases.put("keyProperties", r -> r.setKeyProperties(null));
+        cases.put("exportable", r -> r.getKeyProperties().setExportable(true));
+        cases.put("generatedOnDevice", r -> r.getKeyProperties().setGeneratedOnDevice(false));
+        cases.put("attestationChainValid", r -> r.getKeyProperties().setAttestationChainValid(false));
+        cases.put("publicKeyMatchesAttestation", r -> r.getKeyProperties().setPublicKeyMatchesAttestation(false));
+        for (var c : cases.entrySet()) {
+            tamperedReceipt(c.getValue());
+            IssuanceResponse r = service("SE").verifyAndIssue(signingRequest());
+            assertThat(r.getStage()).as(c.getKey()).isEqualTo(IssuanceResponse.Stage.REJECTED_RECEIPT_MISMATCH);
+            assertThat(r.isIssued()).as(c.getKey()).isFalse();
+            assertThat(r.getErrors()).as(c.getKey()).singleElement().asString().startsWith("RECEIPT_MISMATCH");
+        }
+    }
+
+    @Test
+    @EnabledIf("yubicoFixturePresent")
+    void receiptWithinTheLimitsIsAccepted() throws Exception {
+        java.util.List<java.util.function.Consumer<VerifyResponse>> cases = java.util.List.of(
+                r -> r.setVerificationTimestamp(java.time.Instant.now().minusSeconds(4 * 60)),
+                r -> r.setVerificationTimestamp(java.time.Instant.now().plusSeconds(4 * 60)),
+                r -> r.setHsmVendor("Yubico"),
+                r -> r.setCountryCode("se"));
+        for (var c : cases) {
+            tamperedReceipt(c);
+            assertThat(service("SE").verifyAndIssue(signingRequest()).getStage())
+                    .isEqualTo(IssuanceResponse.Stage.VERIFIED_ISSUED_AND_CONFIRMED);
+        }
+    }
+
     private void resign(IssuanceConfirmResponse c) {
         try {
             java.security.Signature sig = java.security.Signature.getInstance("SHA256withRSA");
@@ -236,6 +292,7 @@ class AttestationServiceGatekeeperFlowTest {
         private IssuanceConfirmRequest lastConfirm;
         private String lastVerifiedFingerprint;
         private java.util.function.Function<IssuanceConfirmRequest, IssuanceConfirmResponse> confirmOverride;
+        private java.util.function.UnaryOperator<VerifyResponse> verifyOverride;
 
         RecordingGatekeeperClient(GatekeeperClient delegate) {
             this.delegate = delegate;
@@ -246,7 +303,7 @@ class AttestationServiceGatekeeperFlowTest {
             lastVerify = request;
             VerifyResponse r = delegate.verify(request);
             lastVerifiedFingerprint = r.getPublicKeyFingerprint();
-            return r;
+            return verifyOverride != null ? verifyOverride.apply(r) : r;
         }
 
         @Override

@@ -41,12 +41,37 @@ public class ReceiptVerifier {
     private static final String DEFAULT_SIGNATURE_ALGORITHM = "SHA256withRSA";
 
     private final GatekeeperKeyRegistry registry;
+    private final String signatureAlgorithm;
 
+    /** With gatekeeper's default receipt signature algorithm, SHA256withRSA. */
     public ReceiptVerifier(GatekeeperKeyRegistry registry) {
+        this(registry, DEFAULT_SIGNATURE_ALGORITHM);
+    }
+
+    /**
+     * @param signatureAlgorithm the JCA name gatekeeper signs with
+     *     ({@code gatekeeper.signing.algorithm}); SHA-1 and MD5 are refused
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    public ReceiptVerifier(GatekeeperKeyRegistry registry,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${swish.gatekeeper.signature-algorithm:SHA256withRSA}") String signatureAlgorithm) {
         if (registry == null) {
             throw new IllegalArgumentException("registry must not be null");
         }
+        String upper = signatureAlgorithm == null ? "" : signatureAlgorithm.toUpperCase(java.util.Locale.ROOT);
+        if (upper.startsWith("SHA1") || upper.startsWith("MD5")) {
+            throw new IllegalStateException("swish.gatekeeper.signature-algorithm " + signatureAlgorithm
+                    + " is too weak");
+        }
+        try {
+            Signature.getInstance(signatureAlgorithm);
+        } catch (Exception e) {
+            throw new IllegalStateException("swish.gatekeeper.signature-algorithm " + signatureAlgorithm
+                    + " is not available: " + e.getMessage(), e);
+        }
         this.registry = registry;
+        this.signatureAlgorithm = signatureAlgorithm;
     }
 
     /**
@@ -120,7 +145,7 @@ public class ReceiptVerifier {
         }
         try {
             PublicKey trustedKey = trusted.get().getPublicKey();
-            Signature sig = Signature.getInstance(DEFAULT_SIGNATURE_ALGORITHM);
+            Signature sig = Signature.getInstance(signatureAlgorithm);
             sig.initVerify(trustedKey);
             sig.update(canonical.get());
             if (!sig.verify(signatureBytes)) {

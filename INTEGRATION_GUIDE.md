@@ -113,7 +113,7 @@ Replace `MockIssuanceClient` with an `IssuanceClient` implementation that takes 
 | `SWISH_SIGNATORY_RIGHTS_MODE` | Signatory-rights adapter | The FE's custom adapter name; **must not stay at `fail-closed`** in production |
 | `SWISH_ISSUANCE_MODE` | CA backend | The FE's custom integration; **must not stay at `mock`** in production |
 
-The mTLS client certificate the FE presents to the gatekeeper is configured at the HTTP-client level — the FE provides the keystore via the standard JVM TLS configuration (`-Djavax.net.ssl.keyStore=...`) or a Spring `RestClient` customizer.
+The mTLS client certificate the FE presents to the gatekeeper, and the trust store for the gatekeeper's certificate, come from a Spring Boot SSL bundle named by `swish.gatekeeper.ssl-bundle` (`spring.ssl.bundle.jks.<name>.keystore.*` / `.truststore.*`, or the `pem` equivalents). When the property is empty the JVM defaults apply (`-Djavax.net.ssl.keyStore=...`). `swish.gatekeeper.url` must be `https://`. If the gatekeeper signs receipts with anything other than SHA256withRSA, set `swish.gatekeeper.signature-algorithm` to the same algorithm.
 
 ---
 
@@ -158,7 +158,7 @@ If the FE's CA signs the CSR but then `gatekeeper.confirm` fails (e.g., public-k
 
 ### 6.3 Receipt validation
 
-Every receipt the FE receives from the gatekeeper must be validated against the trusted gatekeeper certificates in `swish.gatekeeper.trusted-keys` before being relied on. `ReceiptVerifier.verify(receipt)` does this — it (i) re-canonicalises the receipt body, (ii) verifies the gatekeeper signature against each trusted cert, (iii) returns the validated receipt for storage. If validation fails, treat as if the gatekeeper had returned an error — do NOT proceed with issuance.
+Every receipt the FE receives from the gatekeeper must be validated against the trusted gatekeeper certificates in `swish.gatekeeper.trusted-keys` before being relied on. `ReceiptVerifier.verify(receipt)` does this and returns true or false: it (i) parses the signing certificate the receipt carries, (ii) requires that certificate's public key to be one of the trusted keys, and (iii) verifies the signature over the receipt's canonical bytes under that trusted key with `swish.gatekeeper.signature-algorithm`. `AttestationService` then requires the receipt to approve the CSR's key and to belong to this request: issued within 5 minutes, with the country, supplier, key purpose and HSM vendor the request sent and the key properties of a compliant key. If any of this fails, treat it as if the gatekeeper had returned an error — do NOT proceed with issuance.
 
 The FE's trusted-keys list is updated whenever the NCA rotates its receipt-signing key. The NCA publishes both active and retired keys via `GET /v1/gatekeeper/keys`; the FE polls or watches this endpoint and refreshes `swish.gatekeeper.trusted-keys`. Receipts signed under retired keys remain verifiable for the 5-year retention horizon — the registry includes retired keys for that reason.
 

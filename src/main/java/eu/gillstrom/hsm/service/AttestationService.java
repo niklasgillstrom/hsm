@@ -208,6 +208,17 @@ public class AttestationService {
                             + " but this request carries " + local.getCsrPublicKeyFingerprint());
         }
 
+        // An authentic receipt for this key is still not necessarily a receipt
+        // for this request: it has to be current and carry back what this
+        // request sent.
+        String receiptMismatch = receiptMismatch(verifyReceipt, verifyRequest, java.time.Instant.now());
+        if (receiptMismatch != null) {
+            log.warn("Gatekeeper receipt does not match this request (verificationId={}): {}",
+                    verifyReceipt.getVerificationId(), receiptMismatch);
+            return IssuanceResponse.rejectedReceiptMismatch(local, verifyReceipt,
+                    "RECEIPT_MISMATCH: " + receiptMismatch);
+        }
+
         // The BankID signature authorises one issuance. Consumed only now, so
         // that a gatekeeper failure above does not cost the signatory a new
         // signature; a second request with the same signature that got this
@@ -318,6 +329,58 @@ public class AttestationService {
      * (BankID, organisation/Swish numbers, subject DN) is intentionally
      * excluded; it is not part of the gatekeeper's mandate.
      */
+    /** How old, or how far ahead, a gatekeeper receipt may be when it arrives. */
+    static final java.time.Duration RECEIPT_MAX_SKEW = java.time.Duration.ofMinutes(5);
+
+    /**
+     * Null when the receipt was issued within {@link #RECEIPT_MAX_SKEW} of
+     * {@code now}, echoes the country, supplier, key purpose and HSM vendor
+     * this request sent, and reports key properties consistent with
+     * compliance; otherwise what does not match.
+     */
+    static String receiptMismatch(VerifyResponse receipt, VerifyRequest sent, java.time.Instant now) {
+        java.time.Instant at = receipt.getVerificationTimestamp();
+        if (at == null) {
+            return "the receipt has no verificationTimestamp";
+        }
+        if (at.isBefore(now.minus(RECEIPT_MAX_SKEW)) || at.isAfter(now.plus(RECEIPT_MAX_SKEW))) {
+            return "verificationTimestamp " + at + " is more than " + RECEIPT_MAX_SKEW + " from now";
+        }
+        if (!equalsIgnoreCase(receipt.getCountryCode(), sent.getCountryCode())) {
+            return "countryCode " + receipt.getCountryCode() + " is not " + sent.getCountryCode();
+        }
+        if (!java.util.Objects.equals(receipt.getSupplierIdentifier(), sent.getSupplierIdentifier())) {
+            return "supplierIdentifier " + receipt.getSupplierIdentifier() + " is not " + sent.getSupplierIdentifier();
+        }
+        if (!java.util.Objects.equals(receipt.getKeyPurpose(), sent.getKeyPurpose())) {
+            return "keyPurpose " + receipt.getKeyPurpose() + " is not " + sent.getKeyPurpose();
+        }
+        // gatekeeper reports the vendor's name ("Yubico"), its mock the token ("YUBICO").
+        String vendorName = vendorName(sent.getHsmVendor());
+        if (!equalsIgnoreCase(receipt.getHsmVendor(), sent.getHsmVendor())
+                && !equalsIgnoreCase(receipt.getHsmVendor(), vendorName)) {
+            return "hsmVendor " + receipt.getHsmVendor() + " is not " + sent.getHsmVendor();
+        }
+        VerifyResponse.KeyProperties k = receipt.getKeyProperties();
+        if (k == null || !k.isGeneratedOnDevice() || k.isExportable() || !k.isAttestationChainValid()
+                || !k.isPublicKeyMatchesAttestation()) {
+            return "keyProperties " + k + " contradict compliance";
+        }
+        return null;
+    }
+
+    private static boolean equalsIgnoreCase(String a, String b) {
+        return a != null && a.equalsIgnoreCase(b);
+    }
+
+    private static String vendorName(String token) {
+        try {
+            return HsmVendor.valueOf(token.toUpperCase(java.util.Locale.ROOT)).getVendorName();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private static VerifyRequest buildVerifyRequest(CertificateRequest request,
             VerificationResponse local, String countryCode) {
         try {

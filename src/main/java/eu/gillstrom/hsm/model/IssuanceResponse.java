@@ -66,6 +66,13 @@ public class IssuanceResponse {
          * receipt for some other key is not an authorisation for this one.
          */
         REJECTED_RECEIPT_KEY_MISMATCH,
+        /**
+         * The receipt is authentic and approves this key, but is not a receipt
+         * for this request: it is stale or from the future, names another
+         * country, supplier, key purpose or HSM vendor, or its key properties
+         * contradict compliance.
+         */
+        REJECTED_RECEIPT_MISMATCH,
         /** Issuance step failed after a successful gatekeeper verify. */
         REJECTED_ISSUANCE_FAILED,
         /**
@@ -159,6 +166,17 @@ public class IssuanceResponse {
             VerifyResponse receipt, String reason) {
         return IssuanceResponse.builder()
                 .stage(Stage.REJECTED_RECEIPT_KEY_MISMATCH)
+                .issued(false)
+                .verification(v)
+                .verifyReceipt(VerifyResponseSummary.from(receipt))
+                .errors(List.of(reason))
+                .build();
+    }
+
+    public static IssuanceResponse rejectedReceiptMismatch(VerificationResponse v,
+            VerifyResponse receipt, String reason) {
+        return IssuanceResponse.builder()
+                .stage(Stage.REJECTED_RECEIPT_MISMATCH)
                 .issued(false)
                 .verification(v)
                 .verifyReceipt(VerifyResponseSummary.from(receipt))

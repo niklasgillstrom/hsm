@@ -99,6 +99,30 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   `hsm-csr:v2;org=…;swish=…;type=<SIGNING|TRANSPORT>;csr-sha256=…`, and v1
   strings are refused (`anApprovalForAnotherCertificateTypeIsRejected`).
 
+- **A gatekeeper receipt was checked for authenticity and key only.** A
+  genuine, compliant receipt for the same key but another country,
+  supplier or key purpose, or an old one, authorised issuance. The receipt
+  must now be within 5 minutes of now, echo the country code, supplier
+  identifier, key purpose and HSM vendor this request sent, and report key
+  properties consistent with compliance; otherwise
+  `REJECTED_RECEIPT_MISMATCH`. Tests:
+  `AttestationServiceGatekeeperFlowTest.receiptFieldsMustMatchTheRequest`
+  (twelve cases; with the previous code a receipt for another country was
+  issued on), `receiptWithinTheLimitsIsAccepted`, `ReceiptMismatchTest`.
+- **Receipt signatures were verified with SHA256withRSA only.** gatekeeper
+  can sign with any `gatekeeper.signing.algorithm`; hsm now uses
+  `swish.gatekeeper.signature-algorithm` (default SHA256withRSA, SHA-1 and
+  MD5 refused) (`ReceiptVerifierAlgorithmTest`).
+- **The gatekeeper link accepted plain HTTP, and mTLS could only be set
+  JVM-wide.** `HttpGatekeeperClient` now refuses an `http://` URL unless
+  `swish.gatekeeper.allow-insecure-http=true`, takes its TLS material from
+  the SSL bundle named by `swish.gatekeeper.ssl-bundle`, follows no
+  redirects, and quotes at most 512 characters of an error body on one
+  line (`HttpGatekeeperClientTransportTest`). `THREAT_MODEL.md` and
+  `INTEGRATION_GUIDE.md` described a Spring-side mTLS configuration that
+  never reached the JDK client.
+- All 29 guard mutants of the receipt and transport changes are killed.
+
 ### Verifiers
 
 - **Securosys key origin is read from the attestation.** The verifier never
