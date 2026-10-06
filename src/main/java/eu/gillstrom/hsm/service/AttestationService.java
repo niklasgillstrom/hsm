@@ -28,6 +28,7 @@ import eu.gillstrom.hsm.util.Fingerprints;
 import eu.gillstrom.hsm.verification.AzureHsmVerifier;
 import eu.gillstrom.hsm.verification.GoogleCloudHsmVerifier;
 import eu.gillstrom.hsm.verification.MarvellHsmVerifier;
+import eu.gillstrom.hsm.verification.ThalesLunaVerifier;
 import eu.gillstrom.hsm.verification.SecurosysVerifier;
 import eu.gillstrom.hsm.verification.YubicoVerifier;
 
@@ -63,6 +64,7 @@ public class AttestationService {
     private final AzureHsmVerifier azureVerifier;
     private final GoogleCloudHsmVerifier googleVerifier;
     private final MarvellHsmVerifier marvellVerifier;
+    private final ThalesLunaVerifier thalesVerifier;
     private final SignatoryRightsVerifier signatoryRightsVerifier;
     private final GatekeeperClient gatekeeperClient;
     private final ReceiptVerifier receiptVerifier;
@@ -77,6 +79,7 @@ public class AttestationService {
             AzureHsmVerifier azureVerifier,
             GoogleCloudHsmVerifier googleVerifier,
             MarvellHsmVerifier marvellVerifier,
+            ThalesLunaVerifier thalesVerifier,
             SignatoryRightsVerifier signatoryRightsVerifier,
             GatekeeperClient gatekeeperClient,
             ReceiptVerifier receiptVerifier,
@@ -90,6 +93,7 @@ public class AttestationService {
         this.azureVerifier = azureVerifier;
         this.googleVerifier = googleVerifier;
         this.marvellVerifier = marvellVerifier;
+        this.thalesVerifier = thalesVerifier;
         this.signatoryRightsVerifier = signatoryRightsVerifier;
         this.gatekeeperClient = gatekeeperClient;
         this.receiptVerifier = receiptVerifier;
@@ -592,6 +596,21 @@ public class AttestationService {
                             attestedFingerprint = csrFingerprint;
                         }
                     }
+                    case THALES -> {
+                        var result = verifyThales(request, csrPublicKey);
+                        publicKeyMatch = result.isPublicKeyMatch();
+                        attestationChainValid = result.isChainValid();
+                        hsmSerial = result.getHsmSerial();
+                        hsmModel = "Thales Luna";
+                        keyOrigin = result.getKeyOrigin();
+                        keyExportable = result.isExportable();
+                        if (!result.isValid()) {
+                            errors.addAll(result.getErrors());
+                        }
+                        if (result.isPublicKeyMatch()) {
+                            attestedFingerprint = csrFingerprint;
+                        }
+                    }
                     default -> errors.add("Vendor " + vendor + " not yet implemented");
                 }
             }
@@ -716,6 +735,18 @@ public class AttestationService {
                 request.getAttestationData(),
                 request.getAttestationCertChain(),
                 csrPublicKey);
+    }
+
+    private ThalesLunaVerifier.ThalesLunaResult verifyThales(
+            CertificateRequest request, PublicKey csrPublicKey) {
+
+        if (request.getAttestationData() == null || request.getAttestationData().isBlank()) {
+            var result = new ThalesLunaVerifier.ThalesLunaResult();
+            result.addError("attestationData (base64 of the PKC from cmu getpkc) is required for Thales Luna");
+            return result;
+        }
+
+        return thalesVerifier.verifyLunaAttestation(request.getAttestationData(), csrPublicKey);
     }
 
     private HsmVendor detectVendor(String specified) {

@@ -136,6 +136,16 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   evidence as the cloud verifiers. Never valid until a real attestation
   confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). Tests:
   `MarvellHsmVerifierTest` (5).
+- **Thales Luna as a sixth vendor (`THALES`).** A Luna HSM issues a Public
+  Key Confirmation (PKC) only for keys it generated and that cannot leave a
+  Luna HSM (Thales documentation). `ThalesLunaVerifier` checks the PKC chain
+  as Thales's MIT-licensed `luna-pkc-validator` does (signature, issuer, EKU
+  per position, CA flag, validity) under the pinned Chrysalis-ITS Root key,
+  and that the Proof of Origin key is the CSR key. Two published copies of
+  the root (serials 804500000007 and 80450000000D) carry that key. Thales's
+  own PKC and CSR test vector verifies, so this vendor is not behind a
+  format gate. Tests: `ThalesLunaVerifierTest` (8; all five guard mutants
+  are killed).
   `AzureHsmVerifierTest.jwkNamingTheCsrKeyIsNotABinding` fails on 1.5.0.
 
 ## 1.5.0

@@ -5,7 +5,8 @@ public enum HsmVendor {
     SECUROSYS("Securosys", "Primus HSM"),
     AZURE("Microsoft", "Azure Key Vault HSM"),
     GOOGLE("Google Cloud", "Cloud HSM"),
-    MARVELL("Marvell", "LiquidSecurity HSM");
+    MARVELL("Marvell", "LiquidSecurity HSM"),
+    THALES("Thales", "Luna HSM");
     
     private final String vendorName;
     private final String productName;

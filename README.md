@@ -264,6 +264,7 @@ Steps 2–4 reflect Swish's current operational integration (BankID for signator
 | Azure Managed HSM | ⚠️ | `attestationData`: the JSON from `az keyvault key get-attestation` (whole, or its `attributes` or `attributes.attestation` object). Marvell chain under the pinned Marvell roots, both attestations signed by the partition certificate, key attributes and RSA modulus read from the signed blobs (`MarvellAttestation`). Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
 | Google Cloud HSM | ⚠️ | `attestationData` (base64 of `attestation.dat`, gzip or decompressed), `attestationCertChain`. Marvell chain and Google owner chain (Hawksbill Root v1 prod), both pinned; key attributes and RSA modulus read from the signed blob. Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
 | Marvell LiquidSecurity | ⚠️ | `attestationData` (base64 of `attest.dat`, produced when the key is generated), `attestationCertChain` (partition and card certificates). Marvell chain under the pinned Marvell roots, key attributes and RSA modulus or EKCV read from the signed blob. Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
+| Thales Luna | ✅ | `attestationData` (base64 of the DER Public Key Confirmation from `cmu getpkc`). PKC chain (Proof of Origin, Device Authentication, Hardware Origin, Mfg Integrity) under the pinned Chrysalis-ITS Root key; the Proof of Origin certificate's key must be the CSR key. Verified against Thales's own test vector (`src/test/resources/vendor-fixtures/thales-luna`). |
 | AWS CloudHSM | ❌ | Lacks per-key attestation |
 
 
@@ -369,6 +370,24 @@ Request:
   "hsmVendor": "MARVELL",
   "attestationData": "<base64 of attest.dat>",
   "attestationCertChain": ["<partition certificate PEM>", "<card certificate PEM>"],
+  ...
+}
+```
+
+### Thales Luna
+
+A Luna HSM issues a Public Key Confirmation (PKC) for one of its key pairs
+with `cmu getpkc`. Thales: "A Luna HSM will issue confirmations only for
+private keys that were created by a Luna cryptographic module and that can
+never exist outside the security perimeter of a Luna HSM", and `cmu getpkc`
+"works with non-extractable keys only". The PKC has no attribute list; that
+the HSM issued it is the evidence.
+
+Request:
+```json
+{
+  "hsmVendor": "THALES",
+  "attestationData": "<base64 of the DER PKC (.p7b)>",
   ...
 }
 ```
