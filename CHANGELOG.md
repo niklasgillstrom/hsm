@@ -8,6 +8,14 @@ Versions before 1.4.0 have no entry here; their history is recorded in
 
 ### Security
 
+- **Build:** Jackson 3.1.7 and 2.21.7 instead of the 3.1.5 and 2.21.5 that
+  Spring Boot 4.1.1 manages (CVE-2026-83557, listed as fixed in 3.1.6 and
+  2.21.6); `project.build.outputTimestamp`, so the same commit builds to a
+  byte-identical jar (two builds of railgate compared: different hashes
+  without it, identical with it); and the OWASP Dependency-Check scan moved
+  to the `owasp` profile (`mvn -Powasp verify`), so a build without
+  network access or NVD key can run the tests.
+
 - **TRANSPORT requests require confirmed signatory rights.** Until now a
   TRANSPORT request whose signatory could not be confirmed (UNKNOWN or
   UNAUTHORISED) was issued with a warning. With the default
