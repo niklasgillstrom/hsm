@@ -66,7 +66,14 @@ import java.util.zip.GZIPInputStream;
  * PKCS#1 v1.5 signature over all but the last 256 bytes, owner chain under
  * "Hawksbill Root v1 prod"). Marvell's MIT-licensed {@code verify_pubkey.py}
  * was read; its parsers ({@code parse_v1.py}, {@code parse_v2.py},
- * {@code parse_attest_2.x.py}) were not. No real Azure or Google attestation has
+ * {@code parse_attest_2.x.py}) were not. The firmware 3.x layout agrees
+ * with {@code icedevml/kms-attest-verifier} (MIT, 2024), a port of Marvell's
+ * {@code parse_v2.py} written to audit Google Cloud KMS attestations for
+ * CA/Browser Forum key-generation requirements: response header, info header
+ * with the public key at the first offset and the private key at the second,
+ * object header (handle, attribute count, size), {@code >II} records; it
+ * requires the same private-key attributes (EXTRACTABLE 0, NEVER_EXTRACTABLE,
+ * LOCAL and SENSITIVE 1) and reads the modulus from the private-key object. No real Azure or Google attestation has
  * been run through this class; see {@link #FORMAT_CONFIRMED_BY_REAL_SAMPLE}.</p>
  *
  * <p><strong>Layouts.</strong> The last 256 bytes are the signature and the
