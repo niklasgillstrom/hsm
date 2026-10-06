@@ -68,9 +68,11 @@ import java.util.Map;
  *
  * <p>Key hashes are computed as in Entrust's "Construction of nCore key
  * hashes" for RSA (public exponent of at most 32 bits), DSA and ECDSA on
- * NIST P-256; other key types are refused. Both {@code ModuleInformation}
- * and {@code FieldUpgradeModuleInformation} warrants are accepted, and the
- * type is reported.</p>
+ * NIST P-256; other key types are refused. Only {@code ModuleInformation}
+ * warrants are accepted: Entrust states that
+ * {@code FieldUpgradeModuleInformation} certificates "depend on signatures
+ * made using legacy DSA-1024 keys, limiting their security", and NIST SP
+ * 800-131A no longer allows signatures to be made with DSA-1024.</p>
  */
 @Component
 public class NShieldVerifier implements HsmAttestationVerifier {
@@ -301,8 +303,11 @@ public class NShieldVerifier implements HsmAttestationVerifier {
                 checkMech(body.get(new Ddds.Sym("SigMech")));
                 current = warrantKey(body.get(new Ddds.Sym("DelegateKey"))).publicKey();
             } else {
-                if (!"ModuleInformation".equals(type.name())
-                        && !"FieldUpgradeModuleInformation".equals(type.name())) {
+                if ("FieldUpgradeModuleInformation".equals(type.name())) {
+                    throw new Refusal("FieldUpgradeModuleInformation warrants depend on legacy DSA-1024 signatures"
+                            + " (Entrust) and are not accepted");
+                }
+                if (!"ModuleInformation".equals(type.name())) {
                     throw new Refusal("the last certificate is " + type.name() + ", not module information");
                 }
                 checkMech(body.get(new Ddds.Sym("KLF2mech")));

@@ -16,7 +16,10 @@ under KWARN-1), so a re-encoding error would not verify.
 
 Both come from the module with ESN 8938-1075-88BB, whose warrant is a
 `FieldUpgradeModuleInformation` certificate under KWARN-1, in a security world
-with ciphersuite `DLf3072s256mAEScSP800131Ar1`.
+with ciphersuite `DLf3072s256mAEScSP800131Ar1`. The verifier refuses such
+warrants (they depend on legacy DSA-1024 signatures, per Entrust), so the
+tests verify the rest of each bundle under a warrant reissued as
+`ModuleInformation` by a test root, with the real KLF2 and ESN.
 
 - `key_simple_test1.att`: an RSA-2048 key (application `simple`), module
   protected. Its ACL has a group certified by the security officer's key

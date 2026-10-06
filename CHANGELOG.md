@@ -184,11 +184,16 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   and a security-officer-certified group or MakeArchiveBlob action marking
   the key recoverable, which is refused (the Administrator Card Set could
   then use the key: the human factor of Art. 9(3)(d)); `pubkeydata` must be
-  the CSR key (CSRL1). Entrust's softcard example verifies; its
-  module-protected example is refused as recoverable and for UseAsBlobKey.
-  Tests: `NShieldVerifierTest` (25, with Entrust's bundles and synthetic
-  bundles from test keys, including the FIPS world binding, an ECDSA KML
-  and an RSA-4096 key; all 73 guard mutants are killed).
+  the CSR key (CSRL1). Only `ModuleInformation` warrants are accepted:
+  Entrust states that `FieldUpgradeModuleInformation` certificates depend on
+  legacy DSA-1024 signatures, which NIST SP 800-131A no longer allows to be
+  made. Entrust's two examples carry such warrants and are refused after
+  their warrants verify under KWARN-1. Below the warrant, reissued under a
+  test root with the real KLF2 and ESN, Entrust's softcard example verifies
+  and its module-protected example is refused as recoverable and for
+  UseAsBlobKey. Tests: `NShieldVerifierTest` (25, with Entrust's bundles and
+  synthetic bundles from test keys, including the FIPS world binding, an
+  ECDSA KML and an RSA-4096 key; all 75 guard mutants are killed).
 - **Reference-device attestations as tests.** The YubiHSM 2 and Primus
   attestations of RSA-4096 keys that gatekeeper's tests use are now also
   verified here (`ReferenceDeviceAttestationTest`).

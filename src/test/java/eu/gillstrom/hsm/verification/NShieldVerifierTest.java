@@ -68,8 +68,46 @@ class NShieldVerifierTest {
                         + "8ae1df5f60ed52ed0bb518a2b39b18f82b7bbd7d2615234b", 16), BigInteger.valueOf(65537)));
     }
 
+    /** A test root for warrants reissued as ModuleInformation. */
+    private static final KeyPair TEST_ROOT = p521();
+
+    /**
+     * Entrust's bundles carry FieldUpgradeModuleInformation warrants, which
+     * are refused. To verify everything below the warrant against Entrust's
+     * real data, the warrant is reissued as ModuleInformation under a test
+     * root, with the real warrant's KLF2 and ESN; the module state, world
+     * binding and key generation certificates stay Entrust's.
+     */
     private static NShieldVerifier.NShieldResult run(ObjectNode bundle, PublicKey key) {
+        return new NShieldVerifier(TEST_ROOT.getPublic()).verifyNShieldAttestation(reissued(bundle).toString(), key);
+    }
+
+    /** As Entrust published it, under the pinned KWARN-1. */
+    private static NShieldVerifier.NShieldResult runReal(ObjectNode bundle, PublicKey key) {
         return new NShieldVerifier().verifyNShieldAttestation(bundle.toString(), key);
+    }
+
+    private static ObjectNode reissued(ObjectNode bundle) {
+        try {
+            ObjectNode copy = bundle.deepCopy();
+            if (copy.get("warrant") != null && copy.get("warrant").isTextual()
+                    && copy.get("warrant").asText().equals(softcard().get("warrant").asText())) {
+                put(copy, "warrant", Ddds.warrant("KWARN-1", Ddds.cert(TEST_ROOT,
+                        Ddds.moduleInfo("ModuleInformation", "8938-1075-88BB", realKlf2()))));
+            }
+            return copy;
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** KLF2 from Entrust's warrant, read without accepting the warrant. */
+    private static PublicKey realKlf2() throws Exception {
+        List<?> warrant = (List<?>) NShieldVerifier.Ddds.decode(field(softcard(), "warrant"));
+        Map<?, ?> last = (Map<?, ?>) warrant.get(warrant.size() - 1);
+        Map<?, ?> payload = (Map<?, ?>) NShieldVerifier.Ddds.decode((byte[]) last.get(Ddds.sym("Payload")));
+        List<?> q = (List<?>) ((List<?>) payload.get(Ddds.sym("KLF2pub"))).get(3);
+        return NShieldVerifier.ecKey("secp521r1", (BigInteger) q.get(0), (BigInteger) q.get(1));
     }
 
     private static ObjectNode fixture(String name) throws Exception {
@@ -106,7 +144,7 @@ class NShieldVerifierTest {
     // ------------------------------------------------------- Entrust's bundles
 
     @Test
-    @DisplayName("Entrust's softcard bundle: full chain to KWARN-1, key bound, not recoverable")
+    @DisplayName("Entrust's softcard bundle below the warrant: key bound, not recoverable")
     void softcardBundleIsAccepted() throws Exception {
         var r = run(softcard(), SOFTCARD_KEY);
         assertThat(r.getErrors()).isEmpty();
@@ -118,7 +156,24 @@ class NShieldVerifierTest {
         assertThat(r.getProtection()).isEqualTo("softcard");
         assertThat(r.getKeyOrigin()).isEqualTo("generated");
         assertThat(r.getEsn()).isEqualTo("8938-1075-88BB");
-        assertThat(r.getWarrantType()).isEqualTo("FieldUpgradeModuleInformation");
+        assertThat(r.getWarrantType()).isEqualTo("ModuleInformation");
+    }
+
+    @Test
+    @DisplayName("Entrust's warrants verify under KWARN-1 but are FieldUpgradeModuleInformation: refused")
+    void entrustsFieldUpgradeWarrantsAreRefused() throws Exception {
+        for (ObjectNode b : List.of(softcard(), recoverable())) {
+            var r = runReal(b, SOFTCARD_KEY);
+            assertThat(r.getErrors()).containsExactly("NSHIELD_WARRANT_INVALID: FieldUpgradeModuleInformation "
+                    + "warrants depend on legacy DSA-1024 signatures (Entrust) and are not accepted");
+            assertThat(r.isChainValid()).isFalse();
+            assertThat(r.isValid()).isFalse();
+        }
+        // The type is read only after every certificate verified under KWARN-1.
+        byte[] tampered = field(softcard(), "warrant");
+        tampered[700] ^= 1;
+        assertThatThrownBy(() -> NShieldVerifier.verifyWarrant(tampered, new NShieldVerifier().rootKey()))
+                .hasMessage("certificate 2 does not verify");
     }
 
     @Test
@@ -126,6 +181,7 @@ class NShieldVerifierTest {
     void recoverableBundleIsRefused() throws Exception {
         var r = run(recoverable(), recoverableKey);
         assertThat(r.isChainValid()).isTrue();
+        assertThat(r.getWarrantType()).isEqualTo("ModuleInformation");
         assertThat(r.isPublicKeyMatch()).isTrue();
         assertThat(r.isRecoverable()).isTrue();
         assertThat(r.getProtection()).isEqualTo("module");
@@ -148,8 +204,9 @@ class NShieldVerifierTest {
 
     @Test
     void base64OfTheBundleIsAccepted() throws Exception {
-        String b64 = Base64.getEncoder().encodeToString(softcard().toString().getBytes(StandardCharsets.UTF_8));
-        assertThat(new NShieldVerifier().verifyNShieldAttestation(b64, SOFTCARD_KEY).isValid()).isTrue();
+        String b64 = Base64.getEncoder().encodeToString(reissued(softcard()).toString().getBytes(StandardCharsets.UTF_8));
+        assertThat(new NShieldVerifier(TEST_ROOT.getPublic()).verifyNShieldAttestation(b64, SOFTCARD_KEY).isValid())
+                .isTrue();
     }
 
     @Test
@@ -184,16 +241,10 @@ class NShieldVerifierTest {
         ObjectNode renamed = softcard();
         renamed.put("root", "KWARN-2");
         assertThat(run(renamed, SOFTCARD_KEY).getErrors()).containsExactly("NSHIELD_WARRANT_INVALID: root is not KWARN-1");
-        assertThat(hasError(run(flip(softcard(), "warrant", 300), SOFTCARD_KEY), "NSHIELD_WARRANT_INVALID")).isTrue();
+        assertThat(runReal(flip(softcard(), "warrant", 700), SOFTCARD_KEY).getErrors())
+                .containsExactly("NSHIELD_WARRANT_INVALID: certificate 2 does not verify");
     }
 
-    @Test
-    void entrustWarrantYieldsKlf2AndEsn() throws Exception {
-        var w = NShieldVerifier.verifyWarrant(field(softcard(), "warrant"), new NShieldVerifier().rootKey());
-        assertThat(w.esn()).isEqualTo("8938-1075-88BB");
-        assertThat(w.type()).isEqualTo("FieldUpgradeModuleInformation");
-        assertThat(w.klf2().curve()).isEqualTo(NShieldVerifier.CURVE_P521);
-    }
 
     @Test
     void warrantStructureIsEnforced() throws Exception {
@@ -225,6 +276,10 @@ class NShieldVerifierTest {
         assertRefused(Ddds.warrant("KWARN-1",
                 Ddds.cert(root, Ddds.moduleInfo("SmartcardInformation", "ESN", klf2.getPublic()))), root,
                 "the last certificate is SmartcardInformation, not module information");
+        assertRefused(Ddds.warrant("KWARN-1",
+                Ddds.cert(root, Ddds.delegation(delegate.getPublic(), Ddds.MECH)),
+                Ddds.cert(delegate, Ddds.moduleInfo("FieldUpgradeModuleInformation", "ESN", klf2.getPublic()))), root,
+                "FieldUpgradeModuleInformation warrants depend on legacy DSA-1024 signatures (Entrust) and are not accepted");
         assertRefused(Ddds.warrant("KWARN-1",
                 Ddds.cert(root, Ddds.delegation(delegate.getPublic(), List.of(Ddds.sym("ECDSA"),
                         List.of(Ddds.sym("EMSA1"), Ddds.sym("SHA256"))))),
@@ -303,8 +358,7 @@ class NShieldVerifierTest {
     @DisplayName("A warrant for another ESN does not cover Entrust's module state")
     void esnMustMatchTheWarrant() throws Exception {
         KeyPair root = p521();
-        PublicKey klf2 = NShieldVerifier.verifyWarrant(field(softcard(), "warrant"),
-                new NShieldVerifier().rootKey()).klf2().publicKey();
+        PublicKey klf2 = realKlf2();
         for (String esn : List.of("8938-1075-88BB", "8938-1075-88BC")) {
             ObjectNode bundle = softcard();
             put(bundle, "warrant", Ddds.warrant("KWARN-1", Ddds.cert(root, Ddds.moduleInfo("ModuleInformation", esn, klf2))));

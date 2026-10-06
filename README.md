@@ -267,7 +267,7 @@ Steps 2–4 reflect Swish's current operational integration (BankID for signator
 | Thales Luna | ✅ | `attestationData` (base64 of the DER Public Key Confirmation from `cmu getpkc`). PKC chain (Proof of Origin, Device Authentication, Hardware Origin, Mfg Integrity) under the pinned Chrysalis-ITS Root key; the Proof of Origin certificate's key must be the CSR key. Verified against Thales's own test vector (`src/test/resources/vendor-fixtures/thales-luna`). |
 | Crypto4A QASM | ✅ | `attestationData` (the QASM attestation message, base64 of DER or the PEM `ATTESTATION MESSAGE` block). Every signature block (ECDSA P-384 and HSS) must verify over the claims and chain to the pinned C4A_RCA key; the key's `key-spki` must be the CSR key and the same object must carry private-key class, `key-is-confined`, `key-is-hardware-generated` and `key-never-extracted`, plus `qasm-certified-production` and `attestation-keys-are-unique`. Verified against the PKI Consortium's published message (`src/test/resources/vendor-fixtures/crypto4a`). |
 | Fortanix DSM | ✅ | `attestationData` (the key attestation JSON from DSM, `key_attestation_<key UUID>.json`). Authority certificate by PKIX with Fortanix's attestation policy under the pinned Fortanix root at the statement's signing time; the statement must be signed by it, attest the CSR key and carry `fortanixKeyGeneratedInDSM` and `fortanixKeyNeverExportable`. Verified against the sample in Fortanix's documentation (`src/test/resources/vendor-fixtures/fortanix`). |
-| Entrust nShield | ✅ | `attestationData` (the key attestation bundle JSON from `nfkmattest`). Warrant from the pinned KWARN-1 key to the module's KLF2 and ESN; module state signed by KLF2; security officer's key and module key bound by the world binding certificate; key generation certificate signed by the module's KML, for the CSR key; the generation-time ACL must not make the key recoverable (no security-officer-certified group, no recovery blob) nor allow export or key-wrapping permissions, and working blobs must be under the module key. Verified against Entrust's two example bundles (`src/test/resources/vendor-fixtures/nshield`): the softcard-protected key verifies, the recoverable one is refused. |
+| Entrust nShield | ✅ | `attestationData` (the key attestation bundle JSON from `nfkmattest`). Warrant from the pinned KWARN-1 key to the module's KLF2 and ESN; module state signed by KLF2; security officer's key and module key bound by the world binding certificate; key generation certificate signed by the module's KML, for the CSR key; the generation-time ACL must not make the key recoverable (no security-officer-certified group, no recovery blob) nor allow export or key-wrapping permissions, and working blobs must be under the module key. Only `ModuleInformation` warrants are accepted. Entrust's two example bundles (`src/test/resources/vendor-fixtures/nshield`) carry `FieldUpgradeModuleInformation` warrants and are refused; below the warrant (reissued under a test root with their real KLF2 and ESN) the softcard-protected key verifies and the recoverable one is refused. |
 | AWS CloudHSM | ❌ | Lacks per-key attestation |
 
 
@@ -443,11 +443,13 @@ which records the key's generation-time ACL. The ACL decides whether the
 key is recoverable: a permission group certified by the security officer's
 key ("trump ops") or a MakeArchiveBlob action lets the Administrator Card
 Set holders load and use the key without its own protection, so such a key
-is refused (`NSHIELD_KEY_RECOVERABLE`). The verifier accepts both
-`ModuleInformation` and `FieldUpgradeModuleInformation` warrants (the
-latter, which Entrust's examples carry, depends on legacy DSA-1024
-signatures inside the module) and reports which one it saw. Key hashes are
-computed for RSA, DSA and ECDSA P-256 keys; other keys are refused.
+is refused (`NSHIELD_KEY_RECOVERABLE`). Only `ModuleInformation` warrants
+are accepted. Entrust states that `FieldUpgradeModuleInformation`
+certificates "depend on signatures made using legacy DSA-1024 keys,
+limiting their security", and NIST SP 800-131A no longer allows signatures
+to be made with DSA-1024; such a warrant is refused after its signatures
+have verified under KWARN-1. Key hashes are computed for RSA, DSA and ECDSA
+P-256 keys; other keys are refused.
 
 Request:
 ```json
