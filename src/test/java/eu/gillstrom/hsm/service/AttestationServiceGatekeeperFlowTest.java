@@ -176,6 +176,7 @@ class AttestationServiceGatekeeperFlowTest {
                 new GoogleCloudHsmVerifier(),
                 new eu.gillstrom.hsm.verification.MarvellHsmVerifier(),
                 new eu.gillstrom.hsm.verification.ThalesLunaVerifier(),
+                new eu.gillstrom.hsm.verification.Crypto4AVerifier(),
                 (personalNumber, organisationNumber, swishNumber) ->
                         SignatoryRightsVerifier.Result.authorised("test"),
                 gatekeeper,

@@ -29,6 +29,7 @@ import eu.gillstrom.hsm.verification.AzureHsmVerifier;
 import eu.gillstrom.hsm.verification.GoogleCloudHsmVerifier;
 import eu.gillstrom.hsm.verification.MarvellHsmVerifier;
 import eu.gillstrom.hsm.verification.ThalesLunaVerifier;
+import eu.gillstrom.hsm.verification.Crypto4AVerifier;
 import eu.gillstrom.hsm.verification.SecurosysVerifier;
 import eu.gillstrom.hsm.verification.YubicoVerifier;
 
@@ -65,6 +66,7 @@ public class AttestationService {
     private final GoogleCloudHsmVerifier googleVerifier;
     private final MarvellHsmVerifier marvellVerifier;
     private final ThalesLunaVerifier thalesVerifier;
+    private final Crypto4AVerifier crypto4aVerifier;
     private final SignatoryRightsVerifier signatoryRightsVerifier;
     private final GatekeeperClient gatekeeperClient;
     private final ReceiptVerifier receiptVerifier;
@@ -80,6 +82,7 @@ public class AttestationService {
             GoogleCloudHsmVerifier googleVerifier,
             MarvellHsmVerifier marvellVerifier,
             ThalesLunaVerifier thalesVerifier,
+            Crypto4AVerifier crypto4aVerifier,
             SignatoryRightsVerifier signatoryRightsVerifier,
             GatekeeperClient gatekeeperClient,
             ReceiptVerifier receiptVerifier,
@@ -94,6 +97,7 @@ public class AttestationService {
         this.googleVerifier = googleVerifier;
         this.marvellVerifier = marvellVerifier;
         this.thalesVerifier = thalesVerifier;
+        this.crypto4aVerifier = crypto4aVerifier;
         this.signatoryRightsVerifier = signatoryRightsVerifier;
         this.gatekeeperClient = gatekeeperClient;
         this.receiptVerifier = receiptVerifier;
@@ -611,6 +615,21 @@ public class AttestationService {
                             attestedFingerprint = csrFingerprint;
                         }
                     }
+                    case CRYPTO4A -> {
+                        var result = verifyCrypto4A(request, csrPublicKey);
+                        publicKeyMatch = result.isPublicKeyMatch();
+                        attestationChainValid = result.isChainValid();
+                        hsmSerial = result.getHsmSerial();
+                        hsmModel = "Crypto4A QASM";
+                        keyOrigin = result.getKeyOrigin();
+                        keyExportable = result.isExportable();
+                        if (!result.isValid()) {
+                            errors.addAll(result.getErrors());
+                        }
+                        if (result.isPublicKeyMatch()) {
+                            attestedFingerprint = csrFingerprint;
+                        }
+                    }
                     default -> errors.add("Vendor " + vendor + " not yet implemented");
                 }
             }
@@ -747,6 +766,18 @@ public class AttestationService {
         }
 
         return thalesVerifier.verifyLunaAttestation(request.getAttestationData(), csrPublicKey);
+    }
+
+    private Crypto4AVerifier.Crypto4AResult verifyCrypto4A(
+            CertificateRequest request, PublicKey csrPublicKey) {
+
+        if (request.getAttestationData() == null || request.getAttestationData().isBlank()) {
+            var result = new Crypto4AVerifier.Crypto4AResult();
+            result.addError("attestationData (the QASM attestation message, base64 or PEM) is required for Crypto4A");
+            return result;
+        }
+
+        return crypto4aVerifier.verifyCrypto4AAttestation(request.getAttestationData(), csrPublicKey);
     }
 
     private HsmVendor detectVendor(String specified) {

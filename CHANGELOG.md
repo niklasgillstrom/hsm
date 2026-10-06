@@ -129,6 +129,7 @@ Versions before 1.4.0 have no entry here; their history is recorded in
 - Tests: `MarvellAttestationTest` (12, one with Marvell's published example
   values), `AzureHsmVerifierTest` (6, replacing 2), `GoogleCloudHsmVerifierTest`
   (8, replacing 2).
+  `AzureHsmVerifierTest.jwkNamingTheCsrKeyIsNotABinding` fails on 1.5.0.
 - **Physical Marvell LiquidSecurity HSMs as a fifth vendor (`MARVELL`).**
   The hardware behind Azure and Google signs its own key attestation when a
   key is generated. `MarvellHsmVerifier` checks the manufacturer chain
@@ -146,7 +147,18 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   own PKC and CSR test vector verifies, so this vendor is not behind a
   format gate. Tests: `ThalesLunaVerifierTest` (8; all five guard mutants
   are killed).
-  `AzureHsmVerifierTest.jwkNamingTheCsrKeyIsNotABinding` fails on 1.5.0.
+- **Crypto4A QASM as a seventh vendor (`CRYPTO4A`).** `Crypto4AVerifier`
+  follows Crypto4A's attestation specification (C4A-302-0043): every
+  signature block (ECDSA P-384 and HSS/LMS) must verify over the DER claims,
+  carry the attestation EKU and chain to the pinned C4A_RCA key, as
+  `spa-attest verify` checks them. The key's `key-spki` must be the CSR key
+  and the same object must carry private-key class, `key-is-confined`,
+  `key-is-hardware-generated` and `key-never-extracted`, plus
+  `qasm-certified-production` and `attestation-keys-are-unique`. The PKI
+  Consortium's published QASM message verifies, both signatures included.
+  Its OIDs (`1.3.6.1.4.1.39901.6.2.x`) match Crypto4A's specification; the
+  PKI Consortium page lists them one level too deep. Tests:
+  `Crypto4AVerifierTest` (10; all eleven guard mutants are killed).
 
 ## 1.5.0
 

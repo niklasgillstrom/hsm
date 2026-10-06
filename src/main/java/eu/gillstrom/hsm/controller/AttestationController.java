@@ -74,6 +74,6 @@ public class AttestationController {
     @GetMapping("/vendors")
     @Operation(summary = "List supported HSM vendors")
     public ResponseEntity<String[]> vendors() {
-        return ResponseEntity.ok(new String[]{"YUBICO", "SECUROSYS", "AZURE", "GOOGLE", "MARVELL", "THALES"});
+        return ResponseEntity.ok(new String[]{"YUBICO", "SECUROSYS", "AZURE", "GOOGLE", "MARVELL", "THALES", "CRYPTO4A"});
     }
 }

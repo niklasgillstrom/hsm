@@ -97,6 +97,7 @@ class AttestationServiceTransportTest {
                 new AzureHsmVerifier(), new GoogleCloudHsmVerifier(),
                 new eu.gillstrom.hsm.verification.MarvellHsmVerifier(),
                 new eu.gillstrom.hsm.verification.ThalesLunaVerifier(),
+                new eu.gillstrom.hsm.verification.Crypto4AVerifier(),
                 (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"),
                 null, null, issuance, KeyPolicy.defaults(), TEST_CONSENT_POLICY, "SE");
 
@@ -126,6 +127,7 @@ class AttestationServiceTransportTest {
                 new AzureHsmVerifier(), new GoogleCloudHsmVerifier(),
                 new eu.gillstrom.hsm.verification.MarvellHsmVerifier(),
                 new eu.gillstrom.hsm.verification.ThalesLunaVerifier(),
+                new eu.gillstrom.hsm.verification.Crypto4AVerifier(),
                 (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"),
                 null, null, issuance, TEST_KEY_POLICY, new BankIdConsentPolicy("5569641234"), "SE");
 
@@ -146,6 +148,7 @@ class AttestationServiceTransportTest {
                 new GoogleCloudHsmVerifier(),
                 new eu.gillstrom.hsm.verification.MarvellHsmVerifier(),
                 new eu.gillstrom.hsm.verification.ThalesLunaVerifier(),
+                new eu.gillstrom.hsm.verification.Crypto4AVerifier(),
                 signatoryRights,
                 null, null, issuance, TEST_KEY_POLICY, TEST_CONSENT_POLICY, "SE");
     }

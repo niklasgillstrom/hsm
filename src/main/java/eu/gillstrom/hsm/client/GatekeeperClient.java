@@ -62,7 +62,7 @@ public class GatekeeperClient {
      * Returns the signed verification receipt (Step 5).
      * 
      * @param publicKeyPem       PEM-encoded public key from the CSR
-     * @param hsmVendor          HSM vendor: SECUROSYS, YUBICO, AZURE, GOOGLE, MARVELL, THALES
+     * @param hsmVendor          HSM vendor: SECUROSYS, YUBICO, AZURE, GOOGLE, MARVELL, THALES, CRYPTO4A
      * @param attestationData    Vendor-specific attestation data (base64)
      * @param attestationSig     Attestation signature (Securosys only, nullable)
      * @param attestationChain   Attestation certificate chain (PEM strings)

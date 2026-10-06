@@ -38,7 +38,7 @@ public class VerifyRequest {
     /** PEM-encoded attested public key. NOT a CSR. */
     private String publicKey;
 
-    /** {@code YUBICO}, {@code SECUROSYS}, {@code AZURE}, {@code GOOGLE}, {@code MARVELL} or {@code THALES}. */
+    /** {@code YUBICO}, {@code SECUROSYS}, {@code AZURE}, {@code GOOGLE}, {@code MARVELL}, {@code THALES} or {@code CRYPTO4A}. */
     private String hsmVendor;
 
     /** Vendor-specific attestation blob (base64). Null for Yubico. */

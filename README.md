@@ -265,6 +265,7 @@ Steps 2–4 reflect Swish's current operational integration (BankID for signator
 | Google Cloud HSM | ⚠️ | `attestationData` (base64 of `attestation.dat`, gzip or decompressed), `attestationCertChain`. Marvell chain and Google owner chain (Hawksbill Root v1 prod), both pinned; key attributes and RSA modulus read from the signed blob. Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
 | Marvell LiquidSecurity | ⚠️ | `attestationData` (base64 of `attest.dat`, produced when the key is generated), `attestationCertChain` (partition and card certificates). Marvell chain under the pinned Marvell roots, key attributes and RSA modulus or EKCV read from the signed blob. Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
 | Thales Luna | ✅ | `attestationData` (base64 of the DER Public Key Confirmation from `cmu getpkc`). PKC chain (Proof of Origin, Device Authentication, Hardware Origin, Mfg Integrity) under the pinned Chrysalis-ITS Root key; the Proof of Origin certificate's key must be the CSR key. Verified against Thales's own test vector (`src/test/resources/vendor-fixtures/thales-luna`). |
+| Crypto4A QASM | ✅ | `attestationData` (the QASM attestation message, base64 of DER or the PEM `ATTESTATION MESSAGE` block). Every signature block (ECDSA P-384 and HSS) must verify over the claims and chain to the pinned C4A_RCA key; the key's `key-spki` must be the CSR key and the same object must carry private-key class, `key-is-confined`, `key-is-hardware-generated` and `key-never-extracted`, plus `qasm-certified-production` and `attestation-keys-are-unique`. Verified against the PKI Consortium's published message (`src/test/resources/vendor-fixtures/crypto4a`). |
 | AWS CloudHSM | ❌ | Lacks per-key attestation |
 
 
@@ -388,6 +389,26 @@ Request:
 {
   "hsmVendor": "THALES",
   "attestationData": "<base64 of the DER PKC (.p7b)>",
+  ...
+}
+```
+
+### Crypto4A QASM
+
+The QASM signs a set of claims about a key, each checked by the HSM before
+signing (Crypto4A, "Attestation using the QASM", C4A-302-0043). The
+verifier requires the CA/Browser Forum template's claims plus three that
+template leaves optional: `key-is-confined` (.2.7, "generated on the
+claiming QASM and can not be transferred in any way out of the QASM"),
+`key-is-hardware-generated` (.2.8) and `key-never-extracted` (.2.9).
+Generate it with, for example,
+`spa-key-man attest claim --private-key-is-on-hsm <private-key-uuid> --out message.pem`.
+
+Request:
+```json
+{
+  "hsmVendor": "CRYPTO4A",
+  "attestationData": "<message.pem, or base64 of its DER>",
   ...
 }
 ```

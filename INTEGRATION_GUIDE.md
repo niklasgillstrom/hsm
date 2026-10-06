@@ -24,7 +24,7 @@ The audience is a **systems / integration engineer** at the FE who has been aske
 | `service/SignatoryRightsVerifier` (interface) + `FailClosedSignatoryRightsVerifier` + `MockAgreementRegistrySignatoryRightsVerifier` | Validates that the BankID-signed mandate authorises the requesting TL | **No** for production — write a custom adapter against the FE's actual signatory-rights database |
 | `service/BankIdService` | BankID signature verification (operational precondition for issuance) | Reference structure — adapt to the FE's actual BankID provider integration |
 
-The six vendor verifiers, the gatekeeper-client + receipt-validation layer, and the verification-pipeline orchestration in `AttestationService` are usable directly. The CA, signatory-rights and BankID integrations are FE-specific and require adapter work.
+The seven vendor verifiers, the gatekeeper-client + receipt-validation layer, and the verification-pipeline orchestration in `AttestationService` are usable directly. The CA, signatory-rights and BankID integrations are FE-specific and require adapter work.
 
 ---
 
