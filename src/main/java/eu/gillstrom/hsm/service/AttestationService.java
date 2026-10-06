@@ -124,10 +124,14 @@ public class AttestationService {
         }
 
         // TRANSPORT: not subject to HSM-attestation supervision; skip gatekeeper.
+        // Reported under its own stage so that an issuance no gatekeeper took
+        // part in is never counted as a supervised, confirmed one. A TRANSPORT
+        // certificate used to sign a payment is refused at settlement, where
+        // only gatekeeper-registered certificates are accepted.
         if (local.getCertificateType() != CertificateType.SIGNING) {
             try {
                 IssuedCertificate cert = issuanceClient.issue(request, null);
-                return IssuanceResponse.issuedAndConfirmed(local, null, cert, null);
+                return IssuanceResponse.issuedTransportNotSupervised(local, cert);
             } catch (IssuanceException e) {
                 log.warn("Issuance failed for TRANSPORT request: {}", e.getMessage());
                 return IssuanceResponse.rejectedIssuance(local, null, e.getMessage());
@@ -438,18 +442,14 @@ public class AttestationService {
                 request.getSwishNumber());
         boolean authorizedSignatory = signatoryResult.isAuthorised();
         if (!authorizedSignatory) {
-            // Fail-closed: any non-AUTHORISED outcome (UNAUTHORISED or UNKNOWN)
-            // is a hard error for a signing-certificate request. Fall back to
-            // warning-only for transport-certificate requests where signatory
-            // authorisation is not strictly required.
-            String message = "Signatory rights not confirmed (status="
+            // Fail-closed for every certificate type: any non-AUTHORISED outcome
+            // (UNAUTHORISED or UNKNOWN) is a hard error. A TRANSPORT certificate
+            // carries no HSM-attestation requirement, but it is still issued in
+            // the organisation's name and gives access to the Swish API for its
+            // Swish number, so it needs the same signatory authorisation.
+            errors.add("Signatory rights not confirmed (status="
                     + signatoryResult.status() + "): "
-                    + (signatoryResult.reason() != null ? signatoryResult.reason() : "no reason given");
-            if (certType == CertificateType.SIGNING) {
-                errors.add(message);
-            } else {
-                warnings.add(message);
-            }
+                    + (signatoryResult.reason() != null ? signatoryResult.reason() : "no reason given"));
         }
 
         // HSM attestation

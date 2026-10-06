@@ -31,7 +31,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * </ol>
  *
  * <p>TRANSPORT requests are used because they exercise the same two checks
- * without requiring HSM attestation evidence. All material is synthetic.</p>
+ * without requiring HSM attestation evidence. Signatory rights are confirmed
+ * by a stub so that only the two bindings decide the outcome; the signatory
+ * check itself is covered in {@link AttestationServiceTransportTest}. All
+ * material is synthetic.</p>
  */
 class AttestationServiceRequestBindingTest {
 
@@ -50,7 +53,7 @@ class AttestationServiceRequestBindingTest {
                 new YubicoVerifier(),
                 new AzureHsmVerifier(),
                 new GoogleCloudHsmVerifier(),
-                new FailClosedSignatoryRightsVerifier(),
+                (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"),
                 null, null, null, "SE");
     }
 

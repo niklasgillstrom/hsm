@@ -35,6 +35,15 @@ public class IssuanceResponse {
          * gatekeeper confirm all succeeded. The supervisory loop is closed.
          */
         VERIFIED_ISSUED_AND_CONFIRMED,
+        /**
+         * A TRANSPORT certificate was issued after local verification (CSR,
+         * BankID, signatory rights). TRANSPORT certificates are not subject to
+         * HSM-attestation supervision, so no gatekeeper took part: there is no
+         * verify-step receipt and no confirm. Kept apart from
+         * {@link #VERIFIED_ISSUED_AND_CONFIRMED} so the two are never counted
+         * together.
+         */
+        ISSUED_TRANSPORT_NOT_SUPERVISED,
         /** Local pre-checks (CSR / BankID / signatory rights / attestation) failed. */
         REJECTED_LOCAL_VERIFICATION,
         /** Gatekeeper verify call could not be completed (transport, configuration). */
@@ -191,6 +200,17 @@ public class IssuanceResponse {
                 .verification(v)
                 .verifyReceipt(VerifyResponseSummary.from(receipt))
                 .confirmResponse(IssuanceConfirmResponseSummary.from(confirm))
+                .certificate(IssuedCertificateSummary.from(cert))
+                .errors(List.of())
+                .build();
+    }
+
+    public static IssuanceResponse issuedTransportNotSupervised(VerificationResponse v,
+            IssuedCertificate cert) {
+        return IssuanceResponse.builder()
+                .stage(Stage.ISSUED_TRANSPORT_NOT_SUPERVISED)
+                .issued(true)
+                .verification(v)
                 .certificate(IssuedCertificateSummary.from(cert))
                 .errors(List.of())
                 .build();

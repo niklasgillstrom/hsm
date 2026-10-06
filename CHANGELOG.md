@@ -4,6 +4,26 @@ Versions before 1.4.0 have no entry here; their history is recorded in
 `PEER_REVIEW_GUIDE.md` ("Version 1.3.0 — what changed and what to verify" and
 "Corrections after documentation-versus-code review").
 
+## 1.6.0 (unreleased)
+
+### Security
+
+- **TRANSPORT requests require confirmed signatory rights.** Until now a
+  TRANSPORT request whose signatory could not be confirmed (UNKNOWN or
+  UNAUTHORISED) was issued with a warning. With the default
+  `FailClosedSignatoryRightsVerifier`, which answers UNKNOWN to every query,
+  any BankID holder could therefore obtain a TRANSPORT certificate for any
+  organisation and Swish number. The signatory check is now a hard error for
+  every certificate type (`AttestationService.verify`).
+- **TRANSPORT issuance has its own stage.** `verifyAndIssue` reported a
+  TRANSPORT issuance, in which no gatekeeper takes part, as
+  `VERIFIED_ISSUED_AND_CONFIRMED`, the stage that means the supervisory loop
+  is closed. It is now `ISSUED_TRANSPORT_NOT_SUPERVISED`.
+- Tests: `AttestationServiceTransportTest` (3 new, each failing before the
+  change). `AttestationServiceRequestBindingTest` asserted that a TRANSPORT
+  request was valid while signatory rights were UNKNOWN; it now confirms
+  signatory rights with a stub, since it tests the request bindings only.
+
 ## 1.5.0
 
 **Deploy together with gatekeeper 1.5.0 and railgate 1.5.0.** The receipt wire

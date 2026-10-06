@@ -50,7 +50,7 @@ public class AttestationController {
                 + "POST the issued certificate back so the gatekeeper can confirm the "
                 + "public key matches and close its supervisory loop. SIGNING certificates "
                 + "require all four phases; TRANSPORT certificates skip both gatekeeper "
-                + "phases. Reference defaults are fail-closed for the gatekeeper (no "
+                + "phases and are reported as ISSUED_TRANSPORT_NOT_SUPERVISED. Reference defaults are fail-closed for the gatekeeper (no "
                 + "client configured -> SIGNING fails) and mock for issuance (in-process "
                 + "test CA).",
         responses = {
