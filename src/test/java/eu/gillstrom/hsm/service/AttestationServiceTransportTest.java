@@ -35,6 +35,13 @@ class AttestationServiceTransportTest {
     private static final KeyPolicy TEST_KEY_POLICY =
             new KeyPolicy("RSA-2048", KeyPolicy.DEFAULT_ALLOWED_CSR_SIGNATURE_ALGORITHMS);
 
+    /** A mandate text naming this request's organisation and Swish number, as BankIdConsentPolicy requires. */
+    private static final String MANDATE =
+            "Testbolaget AB (556974-3098) ger harmed Teknisk leverantor AB fullmakt att hamta "
+            + "Swish-certifikat for Swish-nummer 1231015932.";
+    /** The fixture's BankID relying party (srvInfo serialNumber). */
+    private static final BankIdConsentPolicy TEST_CONSENT_POLICY = new BankIdConsentPolicy("5566778899");
+
     private BankIdFixture fx;
     private MockIssuanceClient issuance;
 
@@ -89,12 +96,39 @@ class AttestationServiceTransportTest {
                 new BankIdService(fx.anchors()), new SecurosysVerifier(), new YubicoVerifier(),
                 new AzureHsmVerifier(), new GoogleCloudHsmVerifier(),
                 (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"),
-                null, null, issuance, KeyPolicy.defaults(), "SE");
+                null, null, issuance, KeyPolicy.defaults(), TEST_CONSENT_POLICY, "SE");
 
         IssuanceResponse r = service.verifyAndIssue(boundTransportRequest());
 
         assertThat(r.isIssued()).isFalse();
         assertThat(r.getErrors()).anyMatch(e -> e.startsWith("KEY_POLICY_VIOLATION"));
+    }
+
+    @Test
+    @DisplayName("A signature over a harmless text is refused even with a valid binding")
+    void harmlessVisibleTextIsRefused() throws Exception {
+        AttestationService service = service(
+                (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"));
+
+        VerificationResponse r = service.verify(boundTransportRequest("Jag godkanner avtalet"));
+
+        assertThat(r.isValid()).isFalse();
+        assertThat(r.getErrors()).anyMatch(e -> e.startsWith("BANKID_VISIBLE_TEXT_MISMATCH"));
+    }
+
+    @Test
+    @DisplayName("A signature collected by a relying party not on the list is refused")
+    void foreignRelyingPartyIsRefused() throws Exception {
+        AttestationService service = new AttestationService(
+                new BankIdService(fx.anchors()), new SecurosysVerifier(), new YubicoVerifier(),
+                new AzureHsmVerifier(), new GoogleCloudHsmVerifier(),
+                (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"),
+                null, null, issuance, TEST_KEY_POLICY, new BankIdConsentPolicy("5569641234"), "SE");
+
+        VerificationResponse r = service.verify(boundTransportRequest());
+
+        assertThat(r.isValid()).isFalse();
+        assertThat(r.getErrors()).anyMatch(e -> e.startsWith("BANKID_RELYING_PARTY_NOT_ALLOWED"));
     }
 
     // ---------------------------------------------------------------- helpers
@@ -107,14 +141,18 @@ class AttestationServiceTransportTest {
                 new AzureHsmVerifier(),
                 new GoogleCloudHsmVerifier(),
                 signatoryRights,
-                null, null, issuance, TEST_KEY_POLICY, "SE");
+                null, null, issuance, TEST_KEY_POLICY, TEST_CONSENT_POLICY, "SE");
     }
 
     private CertificateRequest boundTransportRequest() throws Exception {
+        return boundTransportRequest(MANDATE);
+    }
+
+    private CertificateRequest boundTransportRequest(String visibleText) throws Exception {
         KeyPair subject = TestPki.newRsaKeyPair(2048);
         String csrPem = TestPki.csrPem(subject, "Test Supplier", subject.getPrivate());
         String binding = BankIdService.expectedBinding(ORG, SWISH, TestPki.csrDer(csrPem));
-        String signature = fx.signedResponseBoundTo("Jag godkanner avtalet", binding);
+        String signature = fx.signedResponseBoundTo(visibleText, binding);
 
         CertificateRequest r = new CertificateRequest();
         r.setCsr(csrPem);

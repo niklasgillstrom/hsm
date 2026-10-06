@@ -45,6 +45,13 @@ class AttestationServiceRequestBindingTest {
     private static final KeyPolicy TEST_KEY_POLICY =
             new KeyPolicy("RSA-2048", KeyPolicy.DEFAULT_ALLOWED_CSR_SIGNATURE_ALGORITHMS);
 
+    /** A mandate text naming this request's organisation and Swish number, as BankIdConsentPolicy requires. */
+    private static final String MANDATE =
+            "Testbolaget AB (556974-3098) ger harmed Teknisk leverantor AB fullmakt att hamta "
+            + "Swish-certifikat for Swish-nummer 1231015932.";
+    /** The fixture's BankID relying party (srvInfo serialNumber). */
+    private static final BankIdConsentPolicy TEST_CONSENT_POLICY = new BankIdConsentPolicy("5566778899");
+
     private BankIdFixture fx;
     private AttestationService service;
 
@@ -58,7 +65,7 @@ class AttestationServiceRequestBindingTest {
                 new AzureHsmVerifier(),
                 new GoogleCloudHsmVerifier(),
                 (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"),
-                null, null, null, TEST_KEY_POLICY, "SE");
+                null, null, null, TEST_KEY_POLICY, TEST_CONSENT_POLICY, "SE");
     }
 
     @Test
@@ -122,7 +129,7 @@ class AttestationServiceRequestBindingTest {
     /** A BankID signature whose usrNonVisibleData binds it to the given CSR. */
     private String bankIdSignedFor(String csrPem) throws Exception {
         String binding = BankIdService.expectedBinding(ORG, SWISH, TestPki.csrDer(csrPem));
-        return fx.signedResponseBoundTo("Jag godkanner avtalet", binding);
+        return fx.signedResponseBoundTo(MANDATE, binding);
     }
 
     private CertificateRequest request(String csrPem, String bankIdSignature) throws Exception {

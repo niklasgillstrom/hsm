@@ -37,6 +37,12 @@ swish:
     # NCA's gatekeeper certificate(s).
     trusted-keys: ${SWISH_GATEKEEPER_TRUSTED_KEYS:}
 
+  bankid:
+    # Organisation numbers of the BankID relying parties (technical suppliers)
+    # whose BankID orders may authorise a request. Comma-separated; hyphens are
+    # ignored. Empty refuses every request (fail-closed).
+    allowed-relying-parties: ${SWISH_BANKID_ALLOWED_RELYING_PARTIES:}
+
   # Keys and CSR signature algorithms a certificate request may use. Exact
   # allow-lists; anything not named is refused with KEY_POLICY_VIOLATION.
   # Keys: RSA-<bits> or EC-<curve> (SEC curve names, e.g. EC-secp384r1).

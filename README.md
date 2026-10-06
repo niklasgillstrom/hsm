@@ -195,6 +195,7 @@ The gatekeeper and issuance components are pluggable via `application.yaml` / en
 | `swish.gatekeeper.country-code` | `SE` | ISO 3166-1 alpha-2 of the operating NCA |
 | `swish.gatekeeper.timeout-ms` | `5000` | site policy |
 | `swish.gatekeeper.trusted-keys` | empty | newline- or comma-separated PEM certificates of authoritative gatekeeper signing keys, including retired keys still relevant for receipts within the DORA Article 28(6) 5-year retention window |
+| `swish.bankid.allowed-relying-parties` | empty (every request refused, logged at `WARN`) | comma-separated organisation numbers of the BankID relying parties (the technical suppliers) whose BankID orders may authorise a request; any other is refused with `BANKID_RELYING_PARTY_NOT_ALLOWED` |
 | `swish.key-policy.allowed-keys` | `RSA-4096` | comma-separated allow-list of `RSA-<bits>` / `EC-<curve>` (SEC names, e.g. `EC-secp384r1`); any other key is refused with `KEY_POLICY_VIOLATION` |
 | `swish.key-policy.allowed-csr-signature-algorithms` | `SHA256withRSA,SHA384withRSA,SHA512withRSA` | comma-separated allow-list of JCA names for the CSR's own signature; SHA-1 and MD5 are refused |
 | `swish.issuance.mode` | `mock` | replace with custom `IssuanceClient` against the Getswish CA |
@@ -248,7 +249,9 @@ hsm-csr:v1;org=<organisationNumber>;swish=<swishNumber>;csr-sha256=<lowercase he
 - `<csr-sha256>` is SHA-256 over the **DER** encoding of the PKCS#10 request — the bytes inside the PEM armour, not the base64 text and not the PEM string. With OpenSSL: `openssl req -in request.csr -outform DER | sha256sum`.
 - The string is UTF-8 encoded and base64 encoded once, into the BankID sign order's `userNonVisibleData` parameter. It comes back base64-encoded in the `usrNonVisibleData` element of the signature XML; `BankIdService` decodes that layer and compares the resulting string.
 
-`AttestationService` recomputes the string from the request in hand and requires byte equality (`MessageDigest.isEqual`). A missing `usrNonVisibleData`, or one belonging to a different organisation number, Swish number or CSR, is rejected with `BANKID_NOT_BOUND_TO_REQUEST`. Without this check, a signature legitimately collected for one request can be replayed with another request's CSR: the signature verifies, the personal number is genuine, and nothing else in the payload contradicts the swap.
+`AttestationService` recomputes the string from the request in hand and requires byte equality (`MessageDigest.isEqual`).
+
+The binding sits in data the signatory never sees, so two further checks apply (`BankIdConsentPolicy`). The BankID relying party, whose organisation number is in `srvInfo` inside the signed data, must be listed in `swish.bankid.allowed-relying-parties` (`BANKID_RELYING_PARTY_NOT_ALLOWED`). And `usrVisibleData`, the text the signatory approved, must contain the request's organisation number (with or without hyphen) and Swish number (`BANKID_VISIBLE_TEXT_MISMATCH`). The wording is otherwise free; the mandate text in the response example above satisfies it. A missing `usrNonVisibleData`, or one belonging to a different organisation number, Swish number or CSR, is rejected with `BANKID_NOT_BOUND_TO_REQUEST`. Without this check, a signature legitimately collected for one request can be replayed with another request's CSR: the signature verifies, the personal number is genuine, and nothing else in the payload contradicts the swap.
 
 Steps 2–4 reflect Swish's current operational integration (BankID for signatory authentication; signatory-rights look-up against an out-of-band registry); if Swish ever switches eID provider, only steps 2–4 change. Steps 5–6 are fixed by DORA and cannot be substituted regardless of any integration-side change.
 

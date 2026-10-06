@@ -93,7 +93,7 @@
 
 ### Mitigations
 
-- **BankID signature verification** — the `usrVisibleData` the signatory saw is cryptographically bound to the BankID signature. Post-hoc denial is contradicted by the signed data.
+- **BankID signature verification** — the `usrVisibleData` the signatory saw is cryptographically bound to the BankID signature, and since 1.6.0 it must name the request's organisation number and Swish number, and the BankID order must come from an allowed relying party (`BankIdConsentPolicy`). Before 1.6.0 neither was checked: the binding sat only in `usrNonVisibleData`, which the signatory does not see, so a signature approved over an unrelated text authorised the request.
 - **OCSP producedAt** — `BasicOCSPResp.getProducedAt()` provides an authoritative, Finansiell-ID-Teknik-signed timestamp for the user certificate's status at the time of issuance.
 - **Structured logging** — SLF4J throughout the verifiers and services; every failure path emits `log.warn(...)` with context.
 

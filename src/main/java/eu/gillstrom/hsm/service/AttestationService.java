@@ -66,6 +66,7 @@ public class AttestationService {
     private final ReceiptVerifier receiptVerifier;
     private final IssuanceClient issuanceClient;
     private final KeyPolicy keyPolicy;
+    private final BankIdConsentPolicy consentPolicy;
     private final String gatekeeperCountryCode;
 
     public AttestationService(BankIdService bankIdService,
@@ -78,6 +79,7 @@ public class AttestationService {
             ReceiptVerifier receiptVerifier,
             IssuanceClient issuanceClient,
             KeyPolicy keyPolicy,
+            BankIdConsentPolicy consentPolicy,
             @Value("${swish.gatekeeper.country-code:SE}") String gatekeeperCountryCode) {
         this.bankIdService = bankIdService;
         this.securosysVerifier = securosysVerifier;
@@ -89,6 +91,7 @@ public class AttestationService {
         this.receiptVerifier = receiptVerifier;
         this.issuanceClient = issuanceClient;
         this.keyPolicy = keyPolicy;
+        this.consentPolicy = consentPolicy;
         this.gatekeeperCountryCode = gatekeeperCountryCode;
     }
 
@@ -445,6 +448,15 @@ public class AttestationService {
                     + "missing or does not equal the canonical binding for this request "
                     + "(expected format " + BankIdService.BINDING_VERSION
                     + ";org=<organisationNumber>;swish=<swishNumber>;csr-sha256=<hex>)");
+        }
+
+        // What the signatory saw, and who asked: the binding above sits in data
+        // the signatory never sees, so the relying party and the visible text
+        // are checked as well (BankIdConsentPolicy).
+        if (bankIdResult.isValid()) {
+            errors.addAll(consentPolicy.violations(bankIdResult.getRelyingPartyOrgNumber(),
+                    bankIdResult.getUsrVisibleData(), request.getOrganisationNumber(),
+                    request.getSwishNumber()));
         }
 
         SignatoryRightsVerifier.Result signatoryResult = signatoryRightsVerifier.check(

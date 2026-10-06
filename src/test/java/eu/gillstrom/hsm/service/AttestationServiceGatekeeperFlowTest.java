@@ -44,6 +44,13 @@ class AttestationServiceGatekeeperFlowTest {
     private static final String ORG = "5569743098";
     private static final String SWISH = "1231015932";
 
+    /** A mandate text naming this request's organisation and Swish number, as BankIdConsentPolicy requires. */
+    private static final String MANDATE =
+            "Testbolaget AB (556974-3098) ger harmed Teknisk leverantor AB fullmakt att hamta "
+            + "Swish-certifikat for Swish-nummer 1231015932.";
+    /** The fixture's BankID relying party (srvInfo serialNumber). */
+    private static final BankIdConsentPolicy TEST_CONSENT_POLICY = new BankIdConsentPolicy("5566778899");
+
     private BankIdFixture fx;
     private GatekeeperKeyRegistry registry;
     private RecordingGatekeeperClient gatekeeper;
@@ -124,6 +131,7 @@ class AttestationServiceGatekeeperFlowTest {
                 new ReceiptVerifier(registry),
                 issuance,
                 KeyPolicy.defaults(),
+                TEST_CONSENT_POLICY,
                 countryCode);
     }
 
@@ -135,7 +143,7 @@ class AttestationServiceGatekeeperFlowTest {
             chain.add(c.asText());
         }
         String binding = BankIdService.expectedBinding(ORG, SWISH, TestPki.csrDer(csrPem));
-        String signature = fx.signedResponseBoundTo("Jag godkanner avtalet", binding);
+        String signature = fx.signedResponseBoundTo(MANDATE, binding);
 
         CertificateRequest r = new CertificateRequest();
         r.setCsr(csrPem);

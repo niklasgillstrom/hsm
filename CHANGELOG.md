@@ -45,6 +45,18 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   Tests: `KeyPolicyTest` (7) and
   `AttestationServiceTransportTest.defaultKeyPolicyRefusesRsa2048`. Tests that
   use synthetic RSA-2048 keys name `RSA-2048` in their policy explicitly.
+- **What the BankID signatory saw, and who asked.** The request binding sits
+  in `usrNonVisibleData`, which the signatory never sees, and neither the
+  BankID relying party nor `usrVisibleData` was checked. Any company with a
+  BankID agreement could have a signatory approve a harmless text with the
+  binding hidden, and the signature authorised a certificate.
+  `BankIdConsentPolicy` now requires the relying party's organisation number
+  (`srvInfo`) to be in `swish.bankid.allowed-relying-parties` (empty by
+  default, refusing everything) and the visible text to contain the request's
+  organisation number and Swish number. Tests: `BankIdConsentPolicyTest` (9)
+  and two in `AttestationServiceTransportTest`. The existing service tests
+  signed "Jag godkanner avtalet"; they now sign a mandate text naming the
+  organisation and Swish number.
 
 ## 1.5.0
 
