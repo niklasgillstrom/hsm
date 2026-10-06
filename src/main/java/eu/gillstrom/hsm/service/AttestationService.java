@@ -156,6 +156,9 @@ public class AttestationService {
         // certificate used to sign a payment is refused at settlement, where
         // only gatekeeper-registered certificates are accepted.
         if (local.getCertificateType() != CertificateType.SIGNING) {
+            if (!bankIdService.consume(request.getBankIdSignatureResponse(), local.getBankIdSignatureTime())) {
+                return IssuanceResponse.rejectedBankIdAlreadyUsed(local, null);
+            }
             try {
                 IssuedCertificate cert = issuanceClient.issue(request, null);
                 return IssuanceResponse.issuedTransportNotSupervised(local, cert);
@@ -203,6 +206,15 @@ public class AttestationService {
                     "RECEIPT_KEY_MISMATCH: the gatekeeper receipt approves public key "
                             + verifyReceipt.getPublicKeyFingerprint()
                             + " but this request carries " + local.getCsrPublicKeyFingerprint());
+        }
+
+        // The BankID signature authorises one issuance. Consumed only now, so
+        // that a gatekeeper failure above does not cost the signatory a new
+        // signature; a second request with the same signature that got this
+        // far is refused, and its gatekeeper verification closed as not issued.
+        if (!bankIdService.consume(request.getBankIdSignatureResponse(), local.getBankIdSignatureTime())) {
+            safeConfirmNonIssuance(verifyReceipt, "BANKID_SIGNATURE_ALREADY_USED", request);
+            return IssuanceResponse.rejectedBankIdAlreadyUsed(local, verifyReceipt);
         }
 
         // Phase 3: issuance.
@@ -476,12 +488,12 @@ public class AttestationService {
         // signature legitimately collected for one request can be presented
         // with another request's CSR.
         String expectedBinding = BankIdService.expectedBinding(
-                request.getOrganisationNumber(), request.getSwishNumber(), csrDer);
+                request.getOrganisationNumber(), request.getSwishNumber(), certType, csrDer);
         if (!BankIdService.isBoundToRequest(bankIdResult.getUsrNonVisibleData(), expectedBinding)) {
             errors.add("BANKID_NOT_BOUND_TO_REQUEST: usrNonVisibleData in the BankID signature is "
                     + "missing or does not equal the canonical binding for this request "
                     + "(expected format " + BankIdService.BINDING_VERSION
-                    + ";org=<organisationNumber>;swish=<swishNumber>;csr-sha256=<hex>)");
+                    + ";org=<organisationNumber>;swish=<swishNumber>;type=<SIGNING|TRANSPORT>;csr-sha256=<hex>)");
         }
 
         // What the signatory saw, and who asked: the binding above sits in data

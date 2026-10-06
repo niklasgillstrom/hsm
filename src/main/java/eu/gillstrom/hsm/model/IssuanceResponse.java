@@ -46,6 +46,11 @@ public class IssuanceResponse {
         ISSUED_TRANSPORT_NOT_SUPERVISED,
         /** Local pre-checks (CSR / BankID / signatory rights / attestation) failed. */
         REJECTED_LOCAL_VERIFICATION,
+        /**
+         * Everything verified, but the BankID signature had already been used
+         * for an issuance; nothing was issued.
+         */
+        REJECTED_BANKID_ALREADY_USED,
         /** Gatekeeper verify call could not be completed (transport, configuration). */
         REJECTED_GATEKEEPER_VERIFY_FAILED,
         /** Gatekeeper verify completed but returned {@code compliant=false}. */
@@ -103,6 +108,17 @@ public class IssuanceResponse {
                 .issued(false)
                 .verification(v)
                 .errors(v.getErrors())
+                .build();
+    }
+
+    public static IssuanceResponse rejectedBankIdAlreadyUsed(VerificationResponse v, VerifyResponse receipt) {
+        return IssuanceResponse.builder()
+                .stage(Stage.REJECTED_BANKID_ALREADY_USED)
+                .issued(false)
+                .verification(v)
+                .verifyReceipt(receipt == null ? null : VerifyResponseSummary.from(receipt))
+                .errors(List.of("BANKID_SIGNATURE_ALREADY_USED: this BankID signature has already been "
+                        + "used for an issuance; a new signature is required"))
                 .build();
     }
 

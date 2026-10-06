@@ -75,6 +75,30 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   (`unsignedConfirmIsNotAClosedLoop`, `signedConfirmForAnotherKeyIsNotAClosedLoop`),
   both failing against the previous check.
 
+- **BankID signatures had no age limit and could be reused.** The OCSP
+  response's `producedAt`, `thisUpdate` and the signing time were never
+  compared with the current time, and BankID's responses carry no
+  `nextUpdate` (verified in the production example in `README.md`), so a
+  signature and its response were accepted at any age and for any number
+  of issuances. `producedAt` must now be at most
+  `swish.bankid.max-signature-age` (default `PT15M`) old, and neither it
+  nor `thisUpdate` may be more than 5 minutes in the future; a signature is
+  consumed at issuance, and a second issuance with it is refused
+  (`REJECTED_BANKID_ALREADY_USED`, closing the second gatekeeper
+  verification as not issued). Tests: `BankIdSignatureVerificationTest`
+  (`staleProducedAtIsRejected`, `futureProducedAtOrThisUpdateIsRejected`,
+  `aSignatureIsConsumedOnce`, `consumedSignaturesExpire` and others),
+  `AttestationServiceTransportTest.aBankIdSignatureIsUsedOnce`,
+  `AttestationServiceGatekeeperFlowTest.aBankIdSignatureAuthorisesOneSigningIssuance`.
+- **OCSP entries were matched on serial number alone.** A serial number is
+  unique only per CA; the entry must now also name the issuing CA by its
+  name and key hashes (`sameSerialOtherIssuerIsRejected`).
+- **The certificate type was outside the BankID binding.** An approval for
+  a SIGNING certificate could be presented for a TRANSPORT certificate for
+  the same key. **Breaking:** the binding is now
+  `hsm-csr:v2;org=…;swish=…;type=<SIGNING|TRANSPORT>;csr-sha256=…`, and v1
+  strings are refused (`anApprovalForAnotherCertificateTypeIsRejected`).
+
 ### Verifiers
 
 - **Securosys key origin is read from the attestation.** The verifier never
@@ -194,9 +218,6 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   UseAsBlobKey. Tests: `NShieldVerifierTest` (25, with Entrust's bundles and
   synthetic bundles from test keys, including the FIPS world binding, an
   ECDSA KML and an RSA-4096 key; all 75 guard mutants are killed).
-- **Reference-device attestations as tests.** The YubiHSM 2 and Primus
-  attestations of RSA-4096 keys that gatekeeper's tests use are now also
-  verified here (`ReferenceDeviceAttestationTest`).
 
 ## 1.5.0
 

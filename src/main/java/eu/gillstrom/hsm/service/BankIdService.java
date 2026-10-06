@@ -38,6 +38,8 @@ import java.security.cert.PKIXParameters;
 import java.security.cert.TrustAnchor;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
+import java.time.Duration;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
@@ -159,11 +161,35 @@ public class BankIdService {
      */
     private static final String OCSP_SIGNING_EKU_OID = "1.3.6.1.5.5.7.3.9";
 
+    /**
+     * Clock skew tolerated when a time in the OCSP response is compared with
+     * now: {@code producedAt} or {@code thisUpdate} further ahead than this is
+     * refused.
+     */
+    static final Duration CLOCK_SKEW = Duration.ofMinutes(5);
+
     private final Set<TrustAnchor> bankIdTrustAnchors;
+    private final Clock clock;
+    private final Duration maxSignatureAge;
+
+    /**
+     * BankID signatures consumed by an issuance, keyed by SHA-256 of the
+     * signature as submitted, with the time after which they are too old to
+     * verify anyway and are dropped. Held in memory: a deployment with several
+     * instances needs a shared store to refuse a replay across them.
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, Instant> consumed =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     @Autowired
-    public BankIdService(@Value("${swish.bankid.allow-test-root:false}") boolean allowTestRoot) {
-        this(pinnedTrustAnchors(allowTestRoot));
+    public BankIdService(@Value("${swish.bankid.allow-test-root:false}") boolean allowTestRoot,
+            @Value("${swish.bankid.max-signature-age:PT15M}") Duration maxSignatureAge) {
+        this(pinnedTrustAnchors(allowTestRoot), Clock.systemUTC(), maxSignatureAge);
+    }
+
+    /** As the Spring constructor, with the default maximum signature age of 15 minutes. */
+    public BankIdService(boolean allowTestRoot) {
+        this(allowTestRoot, Duration.ofMinutes(15));
     }
 
     /**
@@ -174,7 +200,48 @@ public class BankIdService {
      * reach this one.
      */
     BankIdService(Set<TrustAnchor> trustAnchors) {
+        this(trustAnchors, Clock.systemUTC(), Duration.ofMinutes(15));
+    }
+
+    BankIdService(Set<TrustAnchor> trustAnchors, Clock clock, Duration maxSignatureAge) {
+        if (maxSignatureAge == null || maxSignatureAge.isNegative() || maxSignatureAge.isZero()) {
+            throw new IllegalArgumentException("swish.bankid.max-signature-age must be positive");
+        }
         this.bankIdTrustAnchors = Set.copyOf(trustAnchors);
+        this.clock = clock;
+        this.maxSignatureAge = maxSignatureAge;
+    }
+
+    /**
+     * Records that a verified BankID signature has been used for an issuance.
+     *
+     * <p>The request binding ties a signature to one organisation, Swish
+     * number, CSR and certificate type, so a replay can only obtain another
+     * certificate for the same key; this makes even that a refusal. An entry
+     * is kept until {@code producedAt} plus the maximum signature age and the
+     * clock skew, after which {@link #verify} refuses the signature anyway.</p>
+     *
+     * @return false if the signature was already consumed
+     */
+    public boolean consume(String signatureBase64, Instant producedAt) {
+        Instant now = clock.instant();
+        consumed.values().removeIf(expiry -> expiry.isBefore(now));
+        Instant expiry = (producedAt == null ? now : producedAt).plus(maxSignatureAge).plus(CLOCK_SKEW);
+        return consumed.putIfAbsent(sha256Hex(signatureBase64), expiry) == null;
+    }
+
+    /** For tests: how many consumed signatures are remembered. */
+    int usedSignatureCount() {
+        return consumed.size();
+    }
+
+    private static String sha256Hex(String s) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest((s == null ? "" : s).getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 unavailable on this JVM", e);
+        }
     }
 
     static Set<TrustAnchor> pinnedTrustAnchors(boolean allowTestRoot) {
@@ -216,7 +283,7 @@ public class BankIdService {
      * ever changes; a relying party that does not understand the version must
      * reject the signature rather than guess.
      */
-    public static final String BINDING_VERSION = "hsm-csr:v1";
+    public static final String BINDING_VERSION = "hsm-csr:v2";
 
     /**
      * The canonical string that the BankID signature's {@code usrNonVisibleData}
@@ -225,7 +292,7 @@ public class BankIdService {
      *
      * <p>Format (single line, no padding, no trailing separator):</p>
      *
-     * <pre>hsm-csr:v1;org=&lt;organisationNumber&gt;;swish=&lt;swishNumber&gt;;csr-sha256=&lt;hex&gt;</pre>
+     * <pre>hsm-csr:v2;org=&lt;organisationNumber&gt;;swish=&lt;swishNumber&gt;;type=&lt;SIGNING|TRANSPORT&gt;;csr-sha256=&lt;hex&gt;</pre>
      *
      * <p>where {@code hex} is lowercase hex of SHA-256 over the CSR's DER
      * encoding (the bytes inside the PEM armour, not the base64 text). The
@@ -235,18 +302,24 @@ public class BankIdService {
      * is covered by the XML-DSig Reference and cannot be substituted after the
      * fact.</p>
      *
+     * <p>{@code type} is the certificate type requested, so an approval for a
+     * SIGNING certificate cannot be presented for a TRANSPORT certificate for
+     * the same key, or the other way round (v1 had no type).</p>
+     *
      * <p>Without this binding a BankID signature legitimately collected for one
      * certificate request can be replayed against another request carrying a
      * different CSR — the signature verifies, the personal number is genuine,
      * and nothing in the payload contradicts the swap.</p>
      */
-    public static String expectedBinding(String organisationNumber, String swishNumber, byte[] csrDer) {
+    public static String expectedBinding(String organisationNumber, String swishNumber,
+            eu.gillstrom.hsm.model.VerificationResponse.CertificateType certificateType, byte[] csrDer) {
         if (csrDer == null) {
             throw new IllegalArgumentException("csrDer must not be null");
         }
         return BINDING_VERSION
                 + ";org=" + (organisationNumber == null ? "" : organisationNumber)
                 + ";swish=" + (swishNumber == null ? "" : swishNumber)
+                + ";type=" + (certificateType == null ? "" : certificateType.name())
                 + ";csr-sha256=" + csrSha256Hex(csrDer);
     }
 
@@ -306,7 +379,7 @@ public class BankIdService {
      * <p>Callers that need the authorisation act bound to a specific
      * certificate request must additionally compare
      * {@link BankIdResult#getUsrNonVisibleData()} against
-     * {@link #expectedBinding(String, String, byte[])}; this method verifies
+     * {@link #expectedBinding}; this method verifies
      * that the payload was signed, not what the payload says.</p>
      */
     public BankIdResult verify(String signatureBase64, String ocspBase64) {
@@ -732,10 +805,18 @@ public class BankIdService {
             }
 
             // Step 3: the actual revocation status.
+            // The entry must name this certificate: its serial number under
+            // its issuer (the CertID's issuer name and key hashes). A serial
+            // number alone is only unique per CA.
             SingleResp match = null;
+            org.bouncycastle.operator.DigestCalculatorProvider digests =
+                    new org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder().build();
             for (SingleResp single : basic.getResponses()) {
                 if (single.getCertID() != null
-                        && single.getCertID().getSerialNumber().equals(userCert.getSerialNumber())) {
+                        && single.getCertID().getSerialNumber().equals(userCert.getSerialNumber())
+                        && issuingCa != null
+                        && single.getCertID().matchesIssuer(
+                                new org.bouncycastle.cert.jcajce.JcaX509CertificateHolder(issuingCa), digests)) {
                     match = single;
                     break;
                 }
@@ -751,11 +832,28 @@ public class BankIdService {
                 // or unknown.
                 out.errors.add("Certificate status is not good: " + match.getCertStatus());
             }
-            if (match.getNextUpdate() != null && match.getNextUpdate().toInstant().isBefore(Instant.now())) {
+            Instant now = clock.instant();
+            if (match.getNextUpdate() != null && match.getNextUpdate().toInstant().isBefore(now)) {
                 out.errors.add("OCSP response is stale (nextUpdate in the past)");
             }
-            if (basic.getProducedAt() != null) {
+            if (match.getThisUpdate() != null && match.getThisUpdate().toInstant().isAfter(now.plus(CLOCK_SKEW))) {
+                out.errors.add("OCSP thisUpdate is in the future");
+            }
+            // producedAt is the signing time (see verify). The production
+            // BankID response in README.md carries no nextUpdate (thisUpdate
+            // equals producedAt), so without this check a response and its
+            // signature were accepted at any age.
+            if (basic.getProducedAt() == null) {
+                out.errors.add("OCSP response has no producedAt");
+            } else {
                 out.producedAt = basic.getProducedAt().toInstant();
+                if (out.producedAt.isAfter(now.plus(CLOCK_SKEW))) {
+                    out.errors.add("OCSP producedAt is in the future");
+                } else if (out.producedAt.isBefore(now.minus(maxSignatureAge))) {
+                    out.errors.add("BANKID_SIGNATURE_TOO_OLD: the OCSP response was produced at "
+                            + out.producedAt + ", more than " + maxSignatureAge
+                            + " (swish.bankid.max-signature-age) ago");
+                }
             }
 
             // Step 6: nonce binds this response to this signature.

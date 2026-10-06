@@ -394,21 +394,52 @@ public final class BankIdFixture {
                 ocspKp.getPrivate(), false);
     }
 
+    /** A good response produced at {@code producedAt}, with {@code thisUpdate} at the same time. */
+    public String ocspProducedAt(String signatureBase64, Date producedAt) throws Exception {
+        return ocspResponse(signatureBase64, CertificateStatus.GOOD, ocspCert, ocspKp.getPrivate(), true,
+                producedAt, producedAt, bankCaCert);
+    }
+
+    /** A good response produced now whose entry claims {@code thisUpdate}. */
+    public String ocspThisUpdate(String signatureBase64, Date thisUpdate) throws Exception {
+        return ocspResponse(signatureBase64, CertificateStatus.GOOD, ocspCert, ocspKp.getPrivate(), true,
+                new Date(), thisUpdate, bankCaCert);
+    }
+
+    /**
+     * A good response whose entry names the person certificate's serial number
+     * under another issuer (the unrelated CA's name and key hashes).
+     */
+    public String ocspSameSerialOtherIssuer(String signatureBase64) throws Exception {
+        return ocspResponse(signatureBase64, CertificateStatus.GOOD, ocspCert, ocspKp.getPrivate(), true,
+                new Date(), new Date(), foreignCaCert);
+    }
+
     private String ocspResponse(String signatureBase64,
                                 CertificateStatus status,
                                 X509Certificate responderCert,
                                 PrivateKey signingKey,
                                 boolean withNonce) throws Exception {
+        return ocspResponse(signatureBase64, status, responderCert, signingKey, withNonce,
+                new Date(), new Date(), bankCaCert);
+    }
+
+    private String ocspResponse(String signatureBase64,
+                                CertificateStatus status,
+                                X509Certificate responderCert,
+                                PrivateKey signingKey,
+                                boolean withNonce,
+                                Date producedAt,
+                                Date thisUpdate,
+                                X509Certificate certIdIssuer) throws Exception {
         BasicOCSPRespBuilder builder = new BasicOCSPRespBuilder(
                 new JcaRespID(responderCert.getSubjectX500Principal()));
 
         CertificateID certId = new JcaCertificateID(
                 new JcaDigestCalculatorProviderBuilder().build().get(CertificateID.HASH_SHA1),
-                bankCaCert, personCert.getSerialNumber());
-        // In BouncyCastle this overload's Date argument is nextUpdate, not
-        // thisUpdate — passing "now" produces a response that is already stale.
-        Date nextUpdate = new Date(System.currentTimeMillis() + 3600_000L);
-        builder.addResponse(certId, status, nextUpdate, (Extensions) null);
+                certIdIssuer, personCert.getSerialNumber());
+        Date nextUpdate = new Date(Math.max(System.currentTimeMillis(), thisUpdate.getTime()) + 3600_000L);
+        builder.addResponse(certId, status, thisUpdate, nextUpdate, (Extensions) null);
 
         if (withNonce) {
             byte[] head = MessageDigest.getInstance("SHA-1")
@@ -423,7 +454,7 @@ public final class BankIdFixture {
         return Base64.getEncoder().encodeToString(new OCSPRespBuilder()
                 .build(OCSPRespBuilder.SUCCESSFUL,
                         builder.build(cs, new org.bouncycastle.cert.X509CertificateHolder[] {
-                                new JcaX509CertificateHolder(responderCert) }, new Date()))
+                                new JcaX509CertificateHolder(responderCert) }, producedAt))
                 .getEncoded());
     }
 }

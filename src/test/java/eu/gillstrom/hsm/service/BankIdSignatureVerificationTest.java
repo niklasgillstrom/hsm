@@ -1,6 +1,7 @@
 package eu.gillstrom.hsm.service;
 
 import eu.gillstrom.hsm.testsupport.BankIdFixture;
+import java.util.Date;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -131,7 +132,7 @@ class BankIdSignatureVerificationTest {
     @DisplayName("usrNonVisibleData carrying the canonical binding matches the expected string")
     void canonicalBindingIsCarriedInSignedPayload() throws Exception {
         byte[] csrDer = "pretend-this-is-a-csr".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        String binding = BankIdService.expectedBinding("5569743098", "1231015932", csrDer);
+        String binding = BankIdService.expectedBinding("5569743098", "1231015932", eu.gillstrom.hsm.model.VerificationResponse.CertificateType.SIGNING, csrDer);
         String sig = fx.signedResponseBoundTo("Jag godkanner avtalet", binding);
 
         BankIdService.BankIdResult r = service.verify(sig, fx.ocspResponseBase64(sig));
@@ -146,8 +147,8 @@ class BankIdSignatureVerificationTest {
     void bindingForAnotherCsrIsRejected() throws Exception {
         byte[] csrA = "csr-A".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         byte[] csrB = "csr-B".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        String bindingA = BankIdService.expectedBinding("5569743098", "1231015932", csrA);
-        String bindingB = BankIdService.expectedBinding("5569743098", "1231015932", csrB);
+        String bindingA = BankIdService.expectedBinding("5569743098", "1231015932", eu.gillstrom.hsm.model.VerificationResponse.CertificateType.SIGNING, csrA);
+        String bindingB = BankIdService.expectedBinding("5569743098", "1231015932", eu.gillstrom.hsm.model.VerificationResponse.CertificateType.SIGNING, csrB);
 
         // A genuine, valid BankID signature — collected for request A.
         String sig = fx.signedResponseBoundTo("Jag godkanner avtalet", bindingA);
@@ -162,7 +163,7 @@ class BankIdSignatureVerificationTest {
     @Test
     @DisplayName("Missing usrNonVisibleData never satisfies the binding")
     void absentBindingIsRejected() {
-        String binding = BankIdService.expectedBinding("5569743098", "1231015932", new byte[] { 1 });
+        String binding = BankIdService.expectedBinding("5569743098", "1231015932", eu.gillstrom.hsm.model.VerificationResponse.CertificateType.SIGNING, new byte[] { 1 });
 
         assertThat(BankIdService.isBoundToRequest(null, binding)).isFalse();
         assertThat(BankIdService.isBoundToRequest("   ", binding)).isFalse();
@@ -237,5 +238,104 @@ class BankIdSignatureVerificationTest {
                 .hasSize(2)
                 .anyMatch(a -> a.getTrustedCert().getSubjectX500Principal().getName()
                         .contains("Test BankID Root CA v1 Test"));
+    }
+
+    // ------------------------------------------------------------------
+    // Freshness, issuer match and single use
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("An OCSP response older than the maximum signature age is rejected")
+    void staleProducedAtIsRejected() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        Date sixteenMinutesAgo = new Date(System.currentTimeMillis() - 16 * 60_000L);
+        BankIdService.BankIdResult r = service.verify(sig, fx.ocspProducedAt(sig, sixteenMinutesAgo));
+
+        assertThat(r.isValid()).isFalse();
+        assertThat(r.getError()).contains("BANKID_SIGNATURE_TOO_OLD");
+
+        Date fourteenMinutesAgo = new Date(System.currentTimeMillis() - 14 * 60_000L);
+        assertThat(service.verify(sig, fx.ocspProducedAt(sig, fourteenMinutesAgo)).isValid()).isTrue();
+    }
+
+    @Test
+    @DisplayName("The maximum signature age is configurable")
+    void maximumAgeIsConfigurable() throws Exception {
+        BankIdService strict = new BankIdService(fx.anchors(), java.time.Clock.systemUTC(),
+                java.time.Duration.ofMinutes(1));
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        Date twoMinutesAgo = new Date(System.currentTimeMillis() - 2 * 60_000L);
+        assertThat(strict.verify(sig, fx.ocspProducedAt(sig, twoMinutesAgo)).getError())
+                .contains("BANKID_SIGNATURE_TOO_OLD");
+    }
+
+    @Test
+    @DisplayName("A non-positive maximum age is refused at construction")
+    void nonPositiveMaximumAgeIsRefused() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new BankIdService(fx.anchors(),
+                java.time.Clock.systemUTC(), java.time.Duration.ZERO)).isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new BankIdService(fx.anchors(),
+                java.time.Clock.systemUTC(), java.time.Duration.ofMinutes(-1))).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("An OCSP response from the future, beyond the clock skew, is rejected")
+    void futureProducedAtOrThisUpdateIsRejected() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        Date sixMinutesAhead = new Date(System.currentTimeMillis() + 6 * 60_000L);
+        assertThat(service.verify(sig, fx.ocspProducedAt(sig, sixMinutesAhead)).getError())
+                .contains("producedAt is in the future");
+        assertThat(service.verify(sig, fx.ocspThisUpdate(sig, sixMinutesAhead)).getError())
+                .contains("thisUpdate is in the future");
+
+        Date fourMinutesAhead = new Date(System.currentTimeMillis() + 4 * 60_000L);
+        assertThat(service.verify(sig, fx.ocspProducedAt(sig, fourMinutesAhead)).isValid()).isTrue();
+        assertThat(service.verify(sig, fx.ocspThisUpdate(sig, fourMinutesAhead)).isValid()).isTrue();
+    }
+
+    @Test
+    @DisplayName("An OCSP entry for the same serial under another issuer is not this certificate's")
+    void sameSerialOtherIssuerIsRejected() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        BankIdService.BankIdResult r = service.verify(sig, fx.ocspSameSerialOtherIssuer(sig));
+
+        assertThat(r.isValid()).isFalse();
+        assertThat(r.getError()).contains("no entry for certificate serial");
+    }
+
+    @Test
+    @DisplayName("A BankID signature can be consumed once")
+    void aSignatureIsConsumedOnce() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        BankIdService.BankIdResult r = service.verify(sig, fx.ocspResponseBase64(sig));
+
+        assertThat(service.consume(sig, r.getSignatureTime())).isTrue();
+        assertThat(service.consume(sig, r.getSignatureTime())).isFalse();
+        String other = fx.signedResponseBase64("Annan text");
+        assertThat(service.consume(other, r.getSignatureTime())).isTrue();
+    }
+
+    @Test
+    @DisplayName("A consumed signature is forgotten once it is too old to verify anyway")
+    void consumedSignaturesExpire() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<java.time.Instant> now =
+                new java.util.concurrent.atomic.AtomicReference<>(java.time.Instant.now());
+        java.time.Clock clock = new java.time.Clock() {
+            public java.time.ZoneId getZone() { return java.time.ZoneOffset.UTC; }
+            public java.time.Clock withZone(java.time.ZoneId zone) { return this; }
+            public java.time.Instant instant() { return now.get(); }
+        };
+        BankIdService timed = new BankIdService(fx.anchors(), clock, java.time.Duration.ofMinutes(15));
+        java.time.Instant producedAt = now.get();
+        assertThat(timed.consume("sig-a", producedAt)).isTrue();
+        assertThat(timed.usedSignatureCount()).isEqualTo(1);
+
+        now.set(producedAt.plus(java.time.Duration.ofMinutes(19)));
+        assertThat(timed.consume("sig-a", producedAt)).as("still within age plus skew").isFalse();
+
+        now.set(producedAt.plus(java.time.Duration.ofMinutes(20)).plusSeconds(1));
+        assertThat(timed.consume("sig-b", now.get())).isTrue();
+        assertThat(timed.usedSignatureCount()).as("sig-a is past its window and dropped").isEqualTo(1);
+        assertThat(timed.consume("sig-b", now.get())).isFalse();
     }
 }

@@ -90,6 +90,21 @@ class AttestationServiceTransportTest {
     }
 
     @Test
+    @DisplayName("A BankID signature authorises one TRANSPORT issuance")
+    void aBankIdSignatureIsUsedOnce() throws Exception {
+        AttestationService service = service(
+                (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"));
+        CertificateRequest request = boundTransportRequest();
+
+        assertThat(service.verifyAndIssue(request).isIssued()).isTrue();
+        IssuanceResponse again = service.verifyAndIssue(request);
+
+        assertThat(again.isIssued()).isFalse();
+        assertThat(again.getStage().name()).isEqualTo("REJECTED_BANKID_ALREADY_USED");
+        assertThat(again.getErrors()).singleElement().asString().startsWith("BANKID_SIGNATURE_ALREADY_USED");
+    }
+
+    @Test
     @DisplayName("The default key policy refuses an RSA-2048 TRANSPORT request")
     void defaultKeyPolicyRefusesRsa2048() throws Exception {
         AttestationService service = new AttestationService(
@@ -166,7 +181,7 @@ class AttestationServiceTransportTest {
     private CertificateRequest boundTransportRequest(String visibleText) throws Exception {
         KeyPair subject = TestPki.newRsaKeyPair(2048);
         String csrPem = TestPki.csrPem(subject, "Test Supplier", subject.getPrivate());
-        String binding = BankIdService.expectedBinding(ORG, SWISH, TestPki.csrDer(csrPem));
+        String binding = BankIdService.expectedBinding(ORG, SWISH, eu.gillstrom.hsm.model.VerificationResponse.CertificateType.TRANSPORT, TestPki.csrDer(csrPem));
         String signature = fx.signedResponseBoundTo(visibleText, binding);
 
         CertificateRequest r = new CertificateRequest();

@@ -129,11 +129,29 @@ class AttestationServiceRequestBindingTest {
         assertThat(r.getErrors()).anyMatch(e -> e.startsWith("BANKID_NOT_BOUND_TO_REQUEST"));
     }
 
+    @Test
+    void anApprovalForAnotherCertificateTypeIsRejected() throws Exception {
+        // The signatory approved a SIGNING certificate for this key; the
+        // request asks for a TRANSPORT certificate.
+        KeyPair kp = TestPki.newRsaKeyPair(2048);
+        String csrPem = TestPki.csrPem(kp, "Test Supplier", kp.getPrivate());
+        String sig = bankIdSignedFor(csrPem, CertificateType.SIGNING);
+
+        VerificationResponse r = service.verify(request(csrPem, sig));
+
+        assertThat(r.isValid()).isFalse();
+        assertThat(r.getErrors()).anyMatch(e -> e.startsWith("BANKID_NOT_BOUND_TO_REQUEST"));
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /** A BankID signature whose usrNonVisibleData binds it to the given CSR. */
     private String bankIdSignedFor(String csrPem) throws Exception {
-        String binding = BankIdService.expectedBinding(ORG, SWISH, TestPki.csrDer(csrPem));
+        return bankIdSignedFor(csrPem, CertificateType.TRANSPORT);
+    }
+
+    private String bankIdSignedFor(String csrPem, CertificateType type) throws Exception {
+        String binding = BankIdService.expectedBinding(ORG, SWISH, type, TestPki.csrDer(csrPem));
         return fx.signedResponseBoundTo(MANDATE, binding);
     }
 

@@ -76,7 +76,8 @@
 ### Residual risks
 
 - **XXE in indirect consumers.** The library exposes `verify()` methods that take strings. Any caller that itself parses the same XML without XXE protection re-opens the hole. Addressed by having all parsing inside the library.
-- **OCSP response freshness.** BouncyCastle provides `producedAt`; the library does not enforce a maximum age. Callers that require "OCSP produced within X minutes of attestation" must add that check.
+- **OCSP response freshness** *(closed in 1.6.0)*. `producedAt` must be at most `swish.bankid.max-signature-age` (default 15 minutes) old and not more than 5 minutes in the future, and so must `thisUpdate`. Until 1.6.0 no age was enforced, and BankID's responses carry no `nextUpdate`, so a signature and its response were accepted at any age.
+- **Replay of a BankID signature.** The request binding limits a replay to the same organisation, Swish number, CSR and (since 1.6.0) certificate type, so it could only obtain another certificate for the same key. Since 1.6.0 a signature is consumed at issuance and refused a second time. The record is in memory: it does not survive a restart and is not shared between instances, so a deployment with several instances needs a shared store to close this across them; the 15-minute age limit bounds the window either way.
 
 ---
 

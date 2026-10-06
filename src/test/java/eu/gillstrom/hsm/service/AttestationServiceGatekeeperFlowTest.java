@@ -158,6 +158,24 @@ class AttestationServiceGatekeeperFlowTest {
 
     @Test
     @EnabledIf("yubicoFixturePresent")
+    void aBankIdSignatureAuthorisesOneSigningIssuance() throws Exception {
+        AttestationService service = service("SE");
+        CertificateRequest request = signingRequest();
+        assertThat(service.verifyAndIssue(request).getStage())
+                .isEqualTo(IssuanceResponse.Stage.VERIFIED_ISSUED_AND_CONFIRMED);
+
+        IssuanceResponse again = service.verifyAndIssue(request);
+
+        assertThat(again.getStage()).isEqualTo(IssuanceResponse.Stage.REJECTED_BANKID_ALREADY_USED);
+        assertThat(again.isIssued()).isFalse();
+        assertThat(gatekeeper.lastConfirm.isIssued())
+                .as("the second gatekeeper verification is closed as not issued").isFalse();
+        assertThat(gatekeeper.lastConfirm.getVerificationId())
+                .isEqualTo(again.getVerifyReceipt().getVerificationId());
+    }
+
+    @Test
+    @EnabledIf("yubicoFixturePresent")
     void verifyRequestCarriesTheConfiguredCountryCode() throws Exception {
         IssuanceResponse r = service("NO").verifyAndIssue(signingRequest());
 
@@ -196,7 +214,7 @@ class AttestationServiceGatekeeperFlowTest {
         for (JsonNode c : n.get("attestationCertChain")) {
             chain.add(c.asText());
         }
-        String binding = BankIdService.expectedBinding(ORG, SWISH, TestPki.csrDer(csrPem));
+        String binding = BankIdService.expectedBinding(ORG, SWISH, eu.gillstrom.hsm.model.VerificationResponse.CertificateType.SIGNING, TestPki.csrDer(csrPem));
         String signature = fx.signedResponseBoundTo(MANDATE, binding);
 
         CertificateRequest r = new CertificateRequest();
