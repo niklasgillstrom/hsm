@@ -516,7 +516,7 @@ public class AttestationService {
                         if (result.getKeySize() != null) {
                             hsmModel += " (" + result.getAlgorithm() + " " + result.getKeySize() + ")";
                         }
-                        keyOrigin = "generated"; // Securosys: never_extractable=true means generated
+                        keyOrigin = result.getKeyOrigin() != null ? result.getKeyOrigin() : "unverified";
                         keyExportable = result.isExtractable();
                         if (!result.isValid()) {
                             errors.addAll(result.getErrors());

@@ -230,8 +230,8 @@ Numbered pipeline:
 5. **HSM attestation** *(DORA-mandated; SIGNING only)*:
    - Verify that the public key in the CSR matches the attested key (constant-time comparison via `MessageDigest.isEqual`).
    - Verify the attestation certificate chain with PKIX `CertPathValidator` anchored at the pinned vendor root CA.
-   - Verify the attestation signature (BouncyCastle XML signature for Securosys; JWK + Marvell TLV for cloud HSMs).
-   - Verify key attributes: `generatedOnDevice=true`, `exportable=false`.
+   - Verify the attestation signature. Securosys: a detached `SHA256withRSA` (PKCS#1 v1.5) signature over the raw XML bytes, which is what the real fixture carries. PSS-signed attestations (`CKM_SHA256_RSA_PKCS_PSS`, the mechanism in Securosys' own PKCS#11 example `hsm-api-examples/pkcs/c/src/attestation.cpp`) are not supported and are rejected. Cloud HSMs: see the vendor table below.
+   - Verify key attributes: generated on the device and not exportable. Securosys: the root element must be `<private_key creation="generated">` (`SECUROSYS_KEY_NOT_GENERATED` otherwise) and `extractable=false`, `never_extractable=true`, `sensitive=true`, `always_sensitive=true`. Yubico: the origin and capabilities extensions.
 6. **Server-enforced certificate type** *(DORA-mandated)*: SIGNING requests that do not carry attestation evidence are rejected. TRANSPORT requests that do carry attestation data are rejected as ambiguous.
 7. **Issue certificate**: The Swish CA issues a transport or signing certificate matching the validated request type.
 

@@ -102,6 +102,63 @@ class SecurosysVerifierTest {
     }
 
     @Test
+    void importedKeyIsRejectedEvenWithAllFlagsSet() throws Exception {
+        // The four flags all have their passing values, but the attestation
+        // says the key was imported. never_extractable/always_sensitive are
+        // not origin attributes; only creation states where the key came from.
+        Signed s = signedXml("imported");
+
+        SecurosysVerifier.SecurosysAttestationResult r = verifier.verifySecurosysAttestation(
+                s.xmlBase64, s.signatureBase64, chainPem, attestationKp.getPublic());
+
+        assertThat(r.getErrors()).anyMatch(e -> e.startsWith("SECUROSYS_KEY_NOT_GENERATED"));
+    }
+
+    @Test
+    void missingCreationAttributeIsRejected() throws Exception {
+        Signed s = signedXml(null);
+
+        SecurosysVerifier.SecurosysAttestationResult r = verifier.verifySecurosysAttestation(
+                s.xmlBase64, s.signatureBase64, chainPem, attestationKp.getPublic());
+
+        assertThat(r.getErrors()).anyMatch(e -> e.startsWith("SECUROSYS_KEY_NOT_GENERATED"));
+    }
+
+    @Test
+    void generatedKeyRaisesNoOriginError() throws Exception {
+        Signed s = signedXml("generated");
+
+        SecurosysVerifier.SecurosysAttestationResult r = verifier.verifySecurosysAttestation(
+                s.xmlBase64, s.signatureBase64, chainPem, attestationKp.getPublic());
+
+        assertThat(r.getErrors()).noneMatch(e -> e.startsWith("SECUROSYS_KEY_NOT_GENERATED"));
+        assertThat(r.getKeyOrigin()).isEqualTo("generated");
+    }
+
+    private record Signed(String xmlBase64, String signatureBase64) {
+    }
+
+    /** Securosys-shape XML with a {@code private_key} root; {@code creation == null} omits the attribute. */
+    private Signed signedXml(String creation) throws Exception {
+        String pubKeyB64 = Base64.getEncoder().encodeToString(attestationKp.getPublic().getEncoded());
+        String xml = "<private_key" + (creation == null ? "" : " creation=\"" + creation + "\"") + ">"
+                + "<public_key>" + pubKeyB64 + "</public_key>"
+                + "<attributes>"
+                + "<extractable>false</extractable>"
+                + "<never_extractable>true</never_extractable>"
+                + "<sensitive>true</sensitive>"
+                + "<always_sensitive>true</always_sensitive>"
+                + "</attributes>"
+                + "</private_key>";
+        byte[] bytes = xml.getBytes(StandardCharsets.UTF_8);
+        Signature sig = Signature.getInstance("SHA256withRSA");
+        sig.initSign(attestationKp.getPrivate());
+        sig.update(bytes);
+        return new Signed(Base64.getEncoder().encodeToString(bytes),
+                Base64.getEncoder().encodeToString(sig.sign()));
+    }
+
+    @Test
     void emptyChainProducesError() {
         SecurosysVerifier.SecurosysAttestationResult r = verifier.verifySecurosysAttestation(
                 xmlBase64, signatureBase64, Collections.emptyList(), attestationKp.getPublic());

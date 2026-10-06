@@ -185,6 +185,21 @@ public class SecurosysVerifier implements HsmAttestationVerifier {
             result.setSensitive(sensitive);
             result.setAlwaysSensitive(alwaysSensitive);
 
+            // Key origin. The attestation states it explicitly in the root
+            // element: <private_key creation="generated">. never_extractable
+            // and always_sensitive are not origin attributes (PKCS#11 keeps
+            // origin in CKA_LOCAL), so a key created outside the HSM and
+            // imported with extractable=false is not excluded by them.
+            String creation = "private_key".equals(doc.getDocumentElement().getTagName())
+                    ? doc.getDocumentElement().getAttribute("creation") : "";
+            result.setKeyOrigin(creation.isEmpty() ? null : creation);
+            boolean generated = "generated".equals(creation);
+            if (!generated) {
+                result.addError("SECUROSYS_KEY_NOT_GENERATED: the attestation does not state "
+                        + "<private_key creation=\"generated\"> (creation="
+                        + (creation.isEmpty() ? "<missing>" : creation) + ")");
+            }
+
             result.setKeyLabel(firstElementText(doc, "label"));
             result.setAlgorithm(firstElementText(doc, "algorithm"));
             result.setKeySize(firstElementText(doc, "key_size"));
@@ -201,7 +216,7 @@ public class SecurosysVerifier implements HsmAttestationVerifier {
 
             result.setValid(result.isChainValid() && result.isSignatureValid()
                     && result.isPublicKeyMatch() && !extractable && neverExtractable
-                    && sensitive && alwaysSensitive);
+                    && sensitive && alwaysSensitive && generated);
 
         } catch (Exception e) {
             log.warn("Securosys attestation verification threw: {}", e.getMessage(), e);
@@ -337,6 +352,7 @@ public class SecurosysVerifier implements HsmAttestationVerifier {
         private String algorithm;
         private String keySize;
         private String createTime;
+        private String keyOrigin;
         private String hsmSerialNumber;
         private final List<String> errors = new ArrayList<>();
 
@@ -374,6 +390,10 @@ public class SecurosysVerifier implements HsmAttestationVerifier {
 
         public String getKeySize() { return keySize; }
         public void setKeySize(String keySize) { this.keySize = keySize; }
+
+        /** The {@code creation} attribute of the attestation, e.g. {@code generated}; null if absent. */
+        public String getKeyOrigin() { return keyOrigin; }
+        public void setKeyOrigin(String keyOrigin) { this.keyOrigin = keyOrigin; }
 
         public String getCreateTime() { return createTime; }
         public void setCreateTime(String createTime) { this.createTime = createTime; }

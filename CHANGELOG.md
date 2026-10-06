@@ -75,6 +75,24 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   (`unsignedConfirmIsNotAClosedLoop`, `signedConfirmForAnotherKeyIsNotAClosedLoop`),
   both failing against the previous check.
 
+### Verifiers
+
+- **Securosys key origin is read from the attestation.** The verifier never
+  read `<private_key creation="...">`, and `AttestationService` reported
+  `keyOrigin="generated"` for every Securosys key, inferring it from
+  `never_extractable` and `always_sensitive`. Those are not origin
+  attributes; a key created outside the HSM and imported with
+  `extractable=false` was not excluded by them. The root element must now be
+  `private_key` with `creation="generated"`, otherwise
+  `SECUROSYS_KEY_NOT_GENERATED`; the reported `keyOrigin` is the attribute's
+  value. Tests: three in `SecurosysVerifierTest` (the two rejections fail
+  before the change), and `RealAttestationFixtureTest` now asserts the
+  fixture's `keyOrigin` against `expected.json`, as `examples/README.md`
+  already claimed it did.
+- **Documented, not changed:** Securosys attestations signed with PSS
+  (`CKM_SHA256_RSA_PKCS_PSS`, used in Securosys' own PKCS#11 example) are not
+  supported and are rejected. The real fixture is PKCS#1 v1.5.
+
 ## 1.5.0
 
 **Deploy together with gatekeeper 1.5.0 and railgate 1.5.0.** The receipt wire
