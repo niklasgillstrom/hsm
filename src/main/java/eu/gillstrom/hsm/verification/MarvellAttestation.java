@@ -56,47 +56,54 @@ import java.util.zip.GZIPInputStream;
  * Parser and verifier for Marvell LiquidSecurity key attestations, the HSM
  * behind both Azure Managed HSM and Google Cloud HSM.
  *
- * <p><strong>Provenance.</strong> Marvell's format specification is not
- * public. Everything here follows the two vendor tools that are: Microsoft's
- * MIT-licensed parser and validator (blob layout, attribute numbers, firmware
- * 2.x and 3.x signature schemes, Marvell roots) and Google's Apache-licensed
- * {@code verify_attestation_chains.py} in
+ * <p><strong>Provenance.</strong> Three published sources, each checked
+ * here: Marvell's "LiquidSecurity HSM - Software Key Attestation" page
+ * (response layout, attribute numbers and names, firmware 2.x raw-padding
+ * and 3.x PKCS#1 signatures, and a parsed RSA key-pair example), Microsoft's
+ * MIT-licensed parser and validator (byte-level offsets, Marvell roots) and
+ * Google's Apache-licensed {@code verify_attestation_chains.py} in
  * {@code GoogleCloudPlatform/python-docs-samples} (gzip container, SHA-256
  * PKCS#1 v1.5 signature over all but the last 256 bytes, owner chain under
- * "Hawksbill Root v1 prod"). No real attestation has been run through this
- * class; see {@link #FORMAT_CONFIRMED_BY_REAL_SAMPLE}.</p>
+ * "Hawksbill Root v1 prod"). Marvell's MIT-licensed {@code verify_pubkey.py}
+ * was read; its parsers ({@code parse_v1.py}, {@code parse_v2.py},
+ * {@code parse_attest_2.x.py}) were not. No real Azure or Google attestation has
+ * been run through this class; see {@link #FORMAT_CONFIRMED_BY_REAL_SAMPLE}.</p>
  *
  * <p><strong>Layouts.</strong> The last 256 bytes are the signature and the
- * rest is the signed data. The attribute list starts with a header
- * {@code >III} whose second word is the attribute count, followed by that many
- * {@code >II} (type, length) records and their values. Firmware 2.x puts the
- * list at byte 20. Firmware 3.x starts with a response header {@code >IIII}
- * whose third and fourth words are the total size and buffer size; the info
- * header {@code >HHHH} sits at {@code total - (buffer + 256)} and its third
- * word is the offset of the attribute list from there. Microsoft's parser
- * picks the layout by whether a 2.x walk from byte 0 runs out of bytes. Here
- * both layouts are parsed strictly inside the signed data, and a blob that
- * parses as both, or as neither, is rejected.</p>
+ * rest is the signed data. Firmware 3.x follows Marvell's response format: a
+ * {@code ResponseHeader} ({@code >IIII}: response code, flags,
+ * {@code ulTotalSize}, {@code ulBufferSize}), where {@code ulTotalSize} is
+ * the whole response and the attribute buffer is the {@code ulBufferSize}
+ * bytes before the signature. The buffer opens with {@code TLVKeyInfo}
+ * ({@code >HHHH}: version, flags, key-1 offset, key-2 offset); a key pair
+ * carries a public- and a private-key object. Each object is a {@code >III}
+ * header whose second word is the attribute count, then {@code >II} (type,
+ * length) records and their values (Microsoft's offsets). Firmware 2.x puts a
+ * single object at byte 20 (Microsoft only). Both layouts are parsed strictly
+ * inside the signed data, and a blob that parses as both, or as neither, is
+ * rejected.</p>
  *
  * <p><strong>Signature.</strong> Firmware 3.x: PKCS#1 v1.5 with the hash of
  * the partition certificate's own signature algorithm (Microsoft), which is
- * SHA-256 in Google's tool. Firmware 2.x: Microsoft's validator raises the
- * signature to the public exponent and compares only the trailing 32 bytes
- * with SHA-256 of the data, with no padding check. That check is accepted
- * here only for an exponent of at least 65537. With e = 3 and no padding, a
- * cube root modulo 2^256 forges any trailing 32 bytes without the private
- * key.</p>
+ * SHA-256 in Google's tool. Firmware 2.x ("raw padding" in Marvell's
+ * example): Microsoft's validator raises the signature to the public exponent
+ * and compares only the trailing 32 bytes with SHA-256 of the data. That
+ * check is accepted here only for an exponent of at least 65537. With e = 3
+ * and no padding, a cube root modulo 2^256 forges any trailing 32 bytes
+ * without the private key.</p>
  *
  * <p><strong>Key binding.</strong> Microsoft's validator binds the
- * attestation to no public key at all: it reads the key's attributes and its
- * name and version from {@code OBJ_ATTR_ID}. The Azure JSON's {@code key}
- * JWK and the cloud APIs' get-public-key calls are outside the signed blob,
- * so taking the key from them means trusting the cloud provider. The only
- * offline binding is the RSA modulus inside the signed blob. Microsoft's
- * attribute table lists the public exponent ({@code 0x0122}) but not the
- * modulus; {@link #ATTR_MODULUS} = {@code 0x0120} is PKCS#11's
- * {@code CKA_MODULUS} and is an unverified assumption until a real
- * attestation shows it.</p>
+ * attestation to no public key at all, and Google's reads no attributes. The
+ * Azure JSON's {@code key} JWK and the cloud APIs' get-public-key calls are
+ * outside the signed blob, so taking the key from them means trusting the
+ * cloud provider. Marvell's attribute table lists {@code OBJ_ATTR_MODULUS}
+ * ({@code 0x0120}), the KCV ({@code 0x0173}) and the EKCV ({@code 0x1003})
+ * inside the signed blob, and its example carries all three for both halves
+ * of the key pair. In that example the KCV is the first three bytes of SHA-1
+ * and the EKCV the SHA-256 of the key's DER SubjectPublicKeyInfo; the page's
+ * prose calls the EKCV an HKDF extract, which its own example does not
+ * match; Marvell's {@code verify_pubkey.py} computes both from the PEM
+ * body, as here.</p>
  */
 public final class MarvellAttestation {
 
@@ -108,9 +115,9 @@ public final class MarvellAttestation {
     public static final boolean FORMAT_CONFIRMED_BY_REAL_SAMPLE = false;
 
     public static final String FORMAT_UNCONFIRMED_ERROR = "MARVELL_FORMAT_UNCONFIRMED: the Marvell "
-            + "attestation layout and the modulus attribute (0x0120) follow the vendors' published "
-            + "tools but have not been confirmed against a real attestation; no Azure Managed HSM "
-            + "or Google Cloud HSM attestation is accepted until a real fixture is committed";
+            + "attestation layout follows Marvell's and the cloud vendors' published documentation "
+            + "and tools but has not been confirmed against a real Azure Managed HSM or Google Cloud "
+            + "HSM attestation; none is accepted until a real fixture is committed";
 
     public static final int SIGNATURE_SIZE = 256;
     static final int FW2_ATTRIBUTE_OFFSET = 20;
@@ -127,6 +134,8 @@ public final class MarvellAttestation {
     public static final int ATTR_EXTRACTABLE = 0x0162;
     public static final int ATTR_LOCAL = 0x0163;
     public static final int ATTR_NEVER_EXTRACTABLE = 0x0164;
+    public static final int ATTR_KCV = 0x0173;
+    public static final int ATTR_EKCV = 0x1003;
 
     public static final long CKO_PUBLIC_KEY = 2;
     public static final long CKO_PRIVATE_KEY = 3;
@@ -224,8 +233,8 @@ public final class MarvellAttestation {
         FIRMWARE_2X, FIRMWARE_3X
     }
 
-    /** A strictly parsed attestation. */
-    public record Parsed(Layout layout, Map<Integer, byte[]> attributes, byte[] signedData, byte[] signature) {
+    /** One key object's attributes, as Marvell's TLV list encodes them. */
+    public record KeyObject(Map<Integer, byte[]> attributes) {
 
         public byte[] attribute(int type) {
             byte[] v = attributes.get(type);
@@ -252,6 +261,14 @@ public final class MarvellAttestation {
             byte[] v = attributes.get(ATTR_ID);
             return v == null ? null : new String(v, StandardCharsets.UTF_8).replace("\0", "");
         }
+
+        Long objectClass() {
+            return longOrNull(number(ATTR_CLASS));
+        }
+    }
+
+    /** A strictly parsed attestation: one key object, or the two of a key pair. */
+    public record Parsed(Layout layout, List<KeyObject> objects, byte[] signedData, byte[] signature) {
     }
 
     /** Decompresses a gzip container (Google's {@code attestation.dat}); other input is returned as is. */
@@ -281,8 +298,8 @@ public final class MarvellAttestation {
         byte[] data = Arrays.copyOf(blob, blob.length - SIGNATURE_SIZE);
         byte[] sig = Arrays.copyOfRange(blob, blob.length - SIGNATURE_SIZE, blob.length);
 
-        Map<Integer, byte[]> fw2 = tryParse(() -> attributesAt(data, FW2_ATTRIBUTE_OFFSET));
-        Map<Integer, byte[]> fw3 = tryParse(() -> fw3Attributes(blob, data));
+        List<KeyObject> fw2 = tryParse(() -> List.of(new KeyObject(attributesAt(data, FW2_ATTRIBUTE_OFFSET))));
+        List<KeyObject> fw3 = tryParse(() -> fw3Objects(blob, data));
         if (fw2 != null && fw3 != null) {
             throw new IllegalArgumentException("Attestation parses as both firmware 2.x and 3.x; layout is ambiguous");
         }
@@ -294,11 +311,11 @@ public final class MarvellAttestation {
                 : new Parsed(Layout.FIRMWARE_3X, fw3, data, sig);
     }
 
-    private interface AttributeParse {
-        Map<Integer, byte[]> run();
+    private interface ObjectParse {
+        List<KeyObject> run();
     }
 
-    private static Map<Integer, byte[]> tryParse(AttributeParse p) {
+    private static List<KeyObject> tryParse(ObjectParse p) {
         try {
             return p.run();
         } catch (RuntimeException e) {
@@ -306,16 +323,37 @@ public final class MarvellAttestation {
         }
     }
 
-    private static Map<Integer, byte[]> fw3Attributes(byte[] blob, byte[] data) {
+    /**
+     * Marvell's response layout: a {@code ResponseHeader} whose
+     * {@code ulTotalSize} is the length of the whole response and whose
+     * {@code ulBufferSize} is the length of the attribute buffer, which ends
+     * where the signature starts. The buffer opens with {@code TLVKeyInfo}
+     * ({@code usObjectVersion, usFlags, usKey1Offset, usKey2Offset}); a key
+     * pair carries two objects, a single key one ({@code usKey2Offset = 0}).
+     */
+    private static List<KeyObject> fw3Objects(byte[] blob, byte[] data) {
         ByteBuffer b = ByteBuffer.wrap(blob);
         long total = u32(b, 8);
         long buffer = u32(b, 12);
-        long infoOffset = total - (buffer + SIGNATURE_SIZE);
-        if (infoOffset < 0 || infoOffset + 8 > data.length) {
-            throw new IllegalArgumentException("info header outside the signed data");
+        if (total != blob.length) {
+            throw new IllegalArgumentException("ulTotalSize " + total + " is not the attestation length " + blob.length);
         }
-        int listOffset = (int) infoOffset + u16(ByteBuffer.wrap(data), (int) infoOffset + 4);
-        return attributesAt(data, listOffset);
+        long start = total - (buffer + SIGNATURE_SIZE);
+        if (start < 16 || start + 8 > data.length) {
+            throw new IllegalArgumentException("attribute buffer outside the signed data");
+        }
+        ByteBuffer d = ByteBuffer.wrap(data);
+        int key1 = u16(d, (int) start + 4);
+        int key2 = u16(d, (int) start + 6);
+        if (key1 == 0) {
+            throw new IllegalArgumentException("usKey1Offset is zero");
+        }
+        List<KeyObject> objects = new ArrayList<>();
+        objects.add(new KeyObject(attributesAt(data, (int) start + key1)));
+        if (key2 != 0) {
+            objects.add(new KeyObject(attributesAt(data, (int) start + key2)));
+        }
+        return List.copyOf(objects);
     }
 
     /** Walks one {@code >III} header and its {@code >II} records; every byte read must lie in {@code data}. */
@@ -416,13 +454,12 @@ public final class MarvellAttestation {
     }
 
     /**
-     * What a verified private-key attestation, and optionally a verified
-     * public-key attestation of the same key, say about the key.
+     * What verified attestations say about the key.
      *
      * @param extractable    true unless EXTRACTABLE is false and NEVER_EXTRACTABLE is true
      * @param keyOrigin      {@code generated} when LOCAL and NEVER_EXTRACTABLE are both true,
      *                       otherwise {@code unverified}
-     * @param publicKeyMatch the attested modulus and exponent equal the CSR's RSA key
+     * @param publicKeyMatch the private key, or the public key attested with it, is the CSR key
      */
     public record KeyEvidence(boolean extractable, String keyOrigin, boolean publicKeyMatch,
                               String keyId, int keyBits, List<String> errors) {
@@ -430,18 +467,38 @@ public final class MarvellAttestation {
 
     /**
      * Reads key evidence from attestations whose signatures and chains the
-     * caller has already verified. Every attribute must be present with a
-     * well-formed value; a missing attribute counts against the key.
-     *
-     * @param privateKey the private-key attestation
-     * @param publicKey  the public-key attestation of the same key, or null
+     * caller has already verified. Exactly one private-key object
+     * ({@code OBJ_ATTR_CLASS} = {@code CKO_PRIVATE_KEY}) must be present, and
+     * its attributes must be present with well-formed values; a missing
+     * attribute counts against the key. Every object that carries key material
+     * (modulus and exponent, KCV, EKCV) must match the CSR key, and the private
+     * key must be tied to it either directly or through a public-key object in
+     * the same signed blob, which Marvell issues for the two halves of one
+     * generated key pair.
      */
-    public static KeyEvidence evaluate(Parsed privateKey, Parsed publicKey, PublicKey csrKey) {
+    public static KeyEvidence evaluate(List<Parsed> attestations, PublicKey csrKey) {
         List<String> errors = new ArrayList<>();
-
-        if (!Long.valueOf(CKO_PRIVATE_KEY).equals(longOrNull(privateKey.number(ATTR_CLASS)))) {
-            errors.add("MARVELL_NOT_A_PRIVATE_KEY_ATTESTATION: OBJ_ATTR_CLASS is not CKO_PRIVATE_KEY");
+        KeyObject privateKey = null;
+        Parsed privateBlob = null;
+        int privateCount = 0;
+        for (Parsed p : attestations) {
+            for (KeyObject o : p.objects()) {
+                Long cls = o.objectClass();
+                if (Long.valueOf(CKO_PRIVATE_KEY).equals(cls)) {
+                    privateKey = o;
+                    privateBlob = p;
+                    privateCount++;
+                } else if (!Long.valueOf(CKO_PUBLIC_KEY).equals(cls)) {
+                    errors.add("MARVELL_UNEXPECTED_OBJECT: OBJ_ATTR_CLASS " + cls + " is neither a public nor a private key");
+                }
+            }
         }
+        if (privateCount != 1) {
+            errors.add("MARVELL_NO_SINGLE_PRIVATE_KEY: the attestations carry " + privateCount
+                    + " private-key objects; exactly one is required");
+            return new KeyEvidence(true, "unverified", false, null, 0, List.copyOf(errors));
+        }
+
         if (!Long.valueOf(CKK_RSA).equals(longOrNull(privateKey.number(ATTR_KEY_TYPE)))) {
             errors.add("MARVELL_KEY_NOT_RSA: OBJ_ATTR_KEY_TYPE is not CKK_RSA");
         }
@@ -452,56 +509,81 @@ public final class MarvellAttestation {
         if (extractable) {
             errors.add("MARVELL_KEY_EXTRACTABLE: OBJ_ATTR_EXTRACTABLE=" + extractableFlag
                     + ", OBJ_ATTR_NEVER_EXTRACTABLE=" + neverExtractable
-                    + " (required: false and true)");
+                    + " (required: false and true; null means absent or malformed)");
         }
         boolean generated = Boolean.TRUE.equals(local) && Boolean.TRUE.equals(neverExtractable);
         if (!generated) {
             errors.add("MARVELL_KEY_NOT_GENERATED: OBJ_ATTR_LOCAL=" + local
                     + ", OBJ_ATTR_NEVER_EXTRACTABLE=" + neverExtractable
-                    + " (required: true and true)");
+                    + " (required: true and true; null means absent or malformed)");
         }
 
-        if (publicKey != null) {
-            if (!Long.valueOf(CKO_PUBLIC_KEY).equals(longOrNull(publicKey.number(ATTR_CLASS)))) {
-                errors.add("MARVELL_NOT_A_PUBLIC_KEY_ATTESTATION: OBJ_ATTR_CLASS is not CKO_PUBLIC_KEY");
-            }
-            String privateId = privateKey.id();
-            if (privateId == null || !privateId.equals(publicKey.id())) {
-                errors.add("MARVELL_ATTESTATIONS_DIFFER: the public- and private-key attestations "
-                        + "carry different OBJ_ATTR_ID values");
+        if (!(csrKey instanceof RSAPublicKey rsa)) {
+            errors.add("MARVELL_PUBLIC_KEY_MISMATCH: the CSR key is not an RSA key");
+            return new KeyEvidence(extractable, generated ? "generated" : "unverified", false,
+                    privateKey.id(), 0, List.copyOf(errors));
+        }
+        boolean mismatch = false;
+        for (Parsed p : attestations) {
+            for (KeyObject o : p.objects()) {
+                mismatch |= keyMaterial(o, rsa) == Binding.MISMATCH;
             }
         }
-
-        BigInteger modulus = null;
-        BigInteger exponent = null;
-        for (Parsed p : publicKey == null ? List.of(privateKey) : List.of(privateKey, publicKey)) {
-            BigInteger n = p.number(ATTR_MODULUS);
-            BigInteger e = p.number(ATTR_PUBLIC_EXPONENT);
-            if (n == null || e == null) {
-                continue;
-            }
-            if (modulus != null && (!modulus.equals(n) || !exponent.equals(e))) {
-                errors.add("MARVELL_ATTESTATIONS_DIFFER: the attestations carry different RSA keys");
-                modulus = null;
-                break;
-            }
-            modulus = n;
-            exponent = e;
+        boolean bound = keyMaterial(privateKey, rsa) == Binding.MATCH;
+        for (KeyObject o : privateBlob.objects()) {
+            bound |= Long.valueOf(CKO_PUBLIC_KEY).equals(o.objectClass()) && keyMaterial(o, rsa) == Binding.MATCH;
         }
-
-        boolean match = false;
-        if (modulus == null) {
-            errors.add("MARVELL_KEY_NOT_BOUND: no attestation carries both the modulus (0x0120) and "
-                    + "the public exponent (0x0122), so the attestation cannot be tied to the CSR key");
-        } else if (csrKey instanceof RSAPublicKey rsa
-                && rsa.getModulus().equals(modulus) && rsa.getPublicExponent().equals(exponent)) {
-            match = true;
-        } else {
-            errors.add("MARVELL_PUBLIC_KEY_MISMATCH: the attested RSA key is not the CSR key");
+        if (mismatch) {
+            errors.add("MARVELL_PUBLIC_KEY_MISMATCH: an attested modulus, exponent, KCV or EKCV is not the CSR key's");
+        } else if (!bound) {
+            errors.add("MARVELL_KEY_NOT_BOUND: neither the private key nor a public key attested with it "
+                    + "carries a modulus or EKCV, so the attestation cannot be tied to the CSR key");
         }
-
+        boolean match = bound && !mismatch;
         return new KeyEvidence(extractable, generated ? "generated" : "unverified", match,
-                privateKey.id(), modulus == null ? 0 : modulus.bitLength(), List.copyOf(errors));
+                privateKey.id(), match ? rsa.getModulus().bitLength() : 0, List.copyOf(errors));
+    }
+
+    private enum Binding {
+        MATCH, MISMATCH, ABSENT
+    }
+
+    /**
+     * Compares an object's key material with the CSR key. The modulus is the
+     * raw big-endian value; KCV is the first three bytes of SHA-1 and EKCV the
+     * SHA-256 of the DER SubjectPublicKeyInfo, as Marvell's published example
+     * shows ({@code MarvellAttestationTest.marvellPublishedExampleBindsItsKey}).
+     */
+    private static Binding keyMaterial(KeyObject o, RSAPublicKey csr) {
+        BigInteger n = o.number(ATTR_MODULUS);
+        BigInteger e = o.number(ATTR_PUBLIC_EXPONENT);
+        byte[] kcv = o.attributes().get(ATTR_KCV);
+        byte[] ekcv = o.attributes().get(ATTR_EKCV);
+        boolean any = false;
+        try {
+            byte[] spki = csr.getEncoded();
+            if (n != null) {
+                any = true;
+                if (!n.equals(csr.getModulus()) || (e != null && !e.equals(csr.getPublicExponent()))) {
+                    return Binding.MISMATCH;
+                }
+            }
+            if (kcv != null) {
+                byte[] expected = Arrays.copyOf(MessageDigest.getInstance("SHA-1").digest(spki), 3);
+                if (!MessageDigest.isEqual(kcv, expected)) {
+                    return Binding.MISMATCH;
+                }
+            }
+            if (ekcv != null) {
+                any = true;
+                if (!MessageDigest.isEqual(ekcv, MessageDigest.getInstance("SHA-256").digest(spki))) {
+                    return Binding.MISMATCH;
+                }
+            }
+        } catch (java.security.NoSuchAlgorithmException ex) {
+            throw new IllegalStateException(ex);
+        }
+        return any ? Binding.MATCH : Binding.ABSENT;
     }
 
     private static Long longOrNull(BigInteger v) {

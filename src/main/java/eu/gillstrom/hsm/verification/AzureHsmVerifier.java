@@ -23,9 +23,11 @@ import java.util.List;
  * object, as Microsoft's validator accepts it. The attestation object
  * carries {@code version} ({@code MRVL-1}, the only version Microsoft's tool
  * supports), {@code certificatePemFile} (base64url of a PEM bundle),
- * {@code privateKeyAttestation} and, for an asymmetric key,
- * {@code publicKeyAttestation} (base64url Marvell blobs; see
- * {@link MarvellAttestation}).</p>
+ * {@code privateKeyAttestation} and optionally {@code publicKeyAttestation}
+ * (base64url Marvell blobs; see {@link MarvellAttestation}). Microsoft's
+ * README says asymmetric keys receive only the private-key attestation;
+ * Marvell's key-pair response carries both halves in one blob. Either form is
+ * accepted.</p>
  *
  * <p><strong>Trust.</strong> Microsoft's validator checks two chains. The
  * Marvell chain starts from a Marvell root that the validator pins. The
@@ -126,7 +128,8 @@ public class AzureHsmVerifier implements HsmAttestationVerifier {
             }
             result.setSignatureValid(true);
 
-            MarvellAttestation.KeyEvidence evidence = MarvellAttestation.evaluate(privateKey, publicKey, csrPublicKey);
+            MarvellAttestation.KeyEvidence evidence = MarvellAttestation.evaluate(
+                    publicKey == null ? List.of(privateKey) : List.of(privateKey, publicKey), csrPublicKey);
             result.setExportable(evidence.extractable());
             result.setKeyOrigin(evidence.keyOrigin());
             result.setPublicKeyMatch(evidence.publicKeyMatch());

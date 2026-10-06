@@ -34,9 +34,10 @@ import java.util.List;
  * Microsoft's validator pins ({@link MarvellAttestation#marvellRoots()}).</p>
  *
  * <p>Google's tool reads no attributes. The key's attributes and RSA key are
- * read from the single decompressed blob as a private-key attestation
- * ({@link MarvellAttestation#evaluate}); whether Google's blob carries them in
- * that form is unverified until a real attestation is checked. Never valid
+ * read from the decompressed blob, which for a key pair carries a public- and
+ * a private-key object in Marvell's layout ({@link MarvellAttestation#evaluate});
+ * that Google's blob has this form is unverified until a real attestation is
+ * checked. Never valid
  * while {@link MarvellAttestation#FORMAT_CONFIRMED_BY_REAL_SAMPLE} is
  * false.</p>
  */
@@ -141,7 +142,7 @@ public class GoogleCloudHsmVerifier implements HsmAttestationVerifier {
             }
             result.setSignatureValid(true);
 
-            MarvellAttestation.KeyEvidence evidence = MarvellAttestation.evaluate(parsed, null, csrPublicKey);
+            MarvellAttestation.KeyEvidence evidence = MarvellAttestation.evaluate(List.of(parsed), csrPublicKey);
             result.setExtractable(evidence.extractable());
             result.setKeyOrigin(evidence.keyOrigin());
             result.setPublicKeyMatch(evidence.publicKeyMatch());

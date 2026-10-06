@@ -110,16 +110,25 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   roots are now the two in Microsoft's validator: the reissued
   LiquidSecurity root (2024-2034, same key) and the LiquidSecurity 2 root.
 - **Format gate.** No real Marvell attestation has been run through the
-  parser, and the modulus attribute (`0x0120`, PKCS#11 `CKA_MODULUS`) is not
-  in Microsoft's attribute table. Until a real fixture is committed, both
+  parser. Until a real fixture is committed, both
   verifiers add `MARVELL_FORMAT_UNCONFIRMED` and never report a valid
   attestation.
 - **Firmware 2.x signature.** Microsoft's validator compares only the
   trailing 32 bytes of the raw RSA result with the hash. That is accepted only
   for public exponents of at least 65537; under e = 3 a cube root modulo
   2^256 forges it.
-- Tests: `MarvellAttestationTest` (9), `AzureHsmVerifierTest` (6, replacing
-  2), `GoogleCloudHsmVerifierTest` (8, replacing 2).
+- **Marvell's published format.** Marvell's "Software Key Attestation" page
+  and `verify_pubkey.py` document the response layout (one attestation of a
+  key pair carries a public- and a private-key object), `OBJ_ATTR_MODULUS`
+  (`0x0120`), the KCV (`0x0173`, first 3 bytes of SHA-1 of the DER public
+  key) and the EKCV (`0x1003`, SHA-256 of it; the page's prose says HKDF,
+  which neither its example nor its script does). Both objects are read;
+  `ulTotalSize` must be the response length; every object's key material
+  must match the CSR key, and the private key must match through its own
+  modulus or EKCV or through the public key in the same blob.
+- Tests: `MarvellAttestationTest` (12, one with Marvell's published example
+  values), `AzureHsmVerifierTest` (6, replacing 2), `GoogleCloudHsmVerifierTest`
+  (8, replacing 2).
   `AzureHsmVerifierTest.jwkNamingTheCsrKeyIsNotABinding` fails on 1.5.0.
 
 ## 1.5.0

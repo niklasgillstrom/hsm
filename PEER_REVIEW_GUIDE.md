@@ -62,7 +62,7 @@ Checking this document against the code found several places where it described 
 **What is placeholder.**
 
 - **Gatekeeper client default is fail-closed.** `swish.gatekeeper.mode=fail-closed` is the default; `FailClosedGatekeeperClient` throws `GatekeeperException` on every call. This is the production-safe default — it forces a deployer to consciously wire `swish.gatekeeper.mode=http` and `swish.gatekeeper.url` against an authoritative NCA endpoint before any signing certificate can be issued. The `mock` mode is for demonstration and CI only; it auto-registers an ephemeral RSA key in the local `GatekeeperKeyRegistry` and emits a startup `WARN` log so the non-authoritative posture cannot be missed.
-- **Cloud-HSM attestation format unconfirmed.** `AzureHsmVerifier` and `GoogleCloudHsmVerifier` share `MarvellAttestation`, a port of Microsoft's MIT-licensed Marvell parser and validator with Google's owner chain (Hawksbill Root v1 prod). The Marvell roots are those in Microsoft's validator; the key is bound through the RSA modulus attribute `0x0120` in the signed blob, which neither vendor tool reads. No real attestation has been run through it, so both verifiers add `MARVELL_FORMAT_UNCONFIRMED` and never report a valid attestation until one is committed as a fixture.
+- **Cloud-HSM attestation format unconfirmed.** `AzureHsmVerifier` and `GoogleCloudHsmVerifier` share `MarvellAttestation`, built on Marvell's "LiquidSecurity HSM - Software Key Attestation" page and `verify_pubkey.py`, Microsoft's MIT-licensed parser and validator and Google's owner chain (Hawksbill Root v1 prod). The key is bound through the modulus or EKCV in the signed blob, which neither cloud vendor's tool reads; `MarvellAttestationTest.marvellPublishedExampleBindsItsKey` runs Marvell's published example values. No real Azure or Google attestation has been run through it, so both verifiers add `MARVELL_FORMAT_UNCONFIRMED` and never report a valid attestation until one is committed as a fixture.
 - **`SignatoryRightsVerifier` default** — `FailClosedSignatoryRightsVerifier` returns UNKNOWN on every call and emits a `WARN` log. The `MockAgreementRegistrySignatoryRightsVerifier` reads a JSON file. Neither is a Swish or Bolagsverket adapter.
 - **Marvell parser** — follows the vendors' published tools, not Marvell's non-public specification; see the item above.
 
@@ -174,7 +174,7 @@ Each limitation below declares: (a) what the risk is, (b) what the reference imp
 
 ### Marvell attestation format is unconfirmed (High)
 
-- **Risk.** Marvell's specification is not public. `MarvellAttestation` follows Microsoft's parser and validator and Google's sample; the modulus attribute `0x0120` that binds the attestation to the CSR key is PKCS#11's `CKA_MODULUS` and does not appear in Microsoft's attribute table.
+- **Risk.** `MarvellAttestation` follows Marvell's "LiquidSecurity HSM - Software Key Attestation" page and the vendors' tools, but whether Azure's and Google's blobs use exactly that layout is unconfirmed.
 - **Mitigation in reference.** Strict parsing inside the signed data (a blob that fits both layouts or neither is rejected); every attribute must be present; `MARVELL_FORMAT_UNCONFIRMED` keeps both cloud verifiers from ever reporting a valid attestation.
 - **Close in production.** Commit a real Azure Managed HSM and a real Google Cloud HSM attestation as fixtures, confirm the layout and the modulus attribute against them, and set `FORMAT_CONFIRMED_BY_REAL_SAMPLE`. This is a shared concern with the sibling gatekeeper repo.
 
