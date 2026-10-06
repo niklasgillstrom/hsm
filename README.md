@@ -261,8 +261,8 @@ Steps 2–4 reflect Swish's current operational integration (BankID for signator
 |--------|--------|----------------|
 | Securosys Primus | ✅ | `attestationData` (XML), `attestationSignature`, `attestationCertChain` |
 | Yubico YubiHSM 2 | ✅ | `attestationCertChain` |
-| Azure Managed HSM | ⚠️ | `attestationData` (JSON from `az keyvault key get-attestation`). Never valid: `AZURE_ATTRIBUTES_UNVERIFIED` is always added, because exportability and key origin cannot be read without a parser for the Marvell attribute encoding. Manufacturer-chain only; owner-chain (Microsoft) not yet implemented; Marvell trust anchor expired 2025-11-16 (deployer must refresh). |
-| Google Cloud HSM | ⚠️ | `attestationData`, `attestationCertChain`. The gatekeeper (1.5.0) never returns COMPLIANT for it (`GOOGLE_KEY_ORIGIN_UNVERIFIED`), so the gatekeeper step of `verifyAndIssue` always rejects it. Manufacturer-chain only; owner-chain (Google Hawksbill) not yet implemented; Marvell trust anchor expired 2025-11-16 (deployer must refresh). |
+| Azure Managed HSM | ⚠️ | `attestationData`: the JSON from `az keyvault key get-attestation` (whole, or its `attributes` or `attributes.attestation` object). Marvell chain under the pinned Marvell roots, both attestations signed by the partition certificate, key attributes and RSA modulus read from the signed blobs (`MarvellAttestation`). Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
+| Google Cloud HSM | ⚠️ | `attestationData` (base64 of `attestation.dat`, gzip or decompressed), `attestationCertChain`. Marvell chain and Google owner chain (Hawksbill Root v1 prod), both pinned; key attributes and RSA modulus read from the signed blob. Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
 | AWS CloudHSM | ❌ | Lacks per-key attestation |
 
 
@@ -339,11 +339,8 @@ gcloud kms keys versions get-certificate-chain 1 \
   --key mykey --keyring myring --location global \
   --output-file certs.pem
 
-# 2. Decompress attestation
-gunzip attestation.dat.gz
-
-# 3. Base64 encode for API calls
-base64 attestation.dat > attestation.b64
+# 2. Base64 encode for API calls (gzip or decompressed are both accepted)
+base64 -w0 attestation.dat.gz > attestation.b64
 ```
 
 Request:
@@ -399,10 +396,10 @@ Production deployment requires, beyond the reference configuration shipped here:
 - **HSM manufacturer root CAs**:
   - **Securosys Primus** (`SecurosysVerifier`) — real vendor-issued root.
   - **Yubico YubiHSM** (`YubicoVerifier`) — real vendor-issued root, sourced from `https://developers.yubico.com/YubiHSM2/Concepts/yubihsm2-attest-ca-crt.pem`. SHA-256 fingerprint `09:4A:3A:C4:93:C2:BD:CD:65:A5:4B:DF:40:19:0F:52:BB:03:F7:15:63:97:A3:FC:69:D8:AA:9A:39:2F:B7:24`. Operators should re-verify the fingerprint against an authoritative Yubico source.
-  - **Azure Managed HSM** (`AzureHsmVerifier`) and **Google Cloud HSM** (`GoogleCloudHsmVerifier`) — pin the constant `ATTESTATION_TRUST_ANCHOR`, set to the genuine **Marvell/Cavium LiquidSecurity Root CA** (SHA-256 `97:57:57:F0:D7:66:40:E0:3D:14:76:0F:8F:C9:E3:A5:58:26:FA:78:07:B2:C3:92:F7:80:1A:95:BD:69:CC:28`) fetched from Marvell's official distribution at `marvell.com/.../liquid_security_certificate.zip` (the same anchor referenced by Google Cloud HSM's open-source verification code). Two limitations apply: **(i)** the bundled cert expired 2025-11-16; deployers must fetch the current Marvell root before relying on chain validation for attestations created after expiry. **(ii)** Google Cloud HSM's published Python sample (`verify_chains.py`, copyright 2021) verifies attestations against a **dual chain** anchored at BOTH the Marvell manufacturer root AND a cloud-vendor owner root (Google's "Hawksbill Root v1 prod" for Google Cloud HSM; Microsoft's equivalent for Azure Managed HSM). This reference build implements only the manufacturer chain; the owner chain is out of scope. Production deployment of either cloud path requires adding owner-chain validation per current cloud-vendor documentation.
+  - **Azure Managed HSM** (`AzureHsmVerifier`) and **Google Cloud HSM** (`GoogleCloudHsmVerifier`) share `MarvellAttestation`, which pins the two Marvell roots in Microsoft's validator (MIT, `Azure/azure-managed-hsm-key-attestation`): the LiquidSecurity root reissued 2024-07-25 to 2034-07-23 with the same key as the 2015 root pinned before (SHA-256 `23:01:43:DF:00:E0:B4:52:74:3E:06:8A:5B:3F:C0:8D:F8:F0:6C:EF:C4:85:4E:A6:27:AE:B7:EB:D7:0E:E2:F4`) and the LiquidSecurity 2 root (SHA-256 `17:64:4D:E0:D3:3B:C7:3B:2F:4E:F4:C2:0A:11:F6:C8:CC:1F:72:3A:4C:D8:3E:E6:00:36:1C:BB:24:D8:D2:E5`). Google's owner root "Hawksbill Root v1 prod" (SHA-256 `46:B5:FD:35:1D:56:A0:72:1C:A0:AF:CD:17:31:C0:F7:B7:4E:39:41:EB:81:8B:FD:0E:C3:6E:29:DF:0D:E0:95`, valid to 2030-01-01) is copied from Google's `verify_attestation_chains.py`. Microsoft's validator also checks a partition chain, but it starts from a self-signed certificate taken from the submitted bundle, so it is not used. Operators should re-verify the Marvell roots against `marvell.com/.../liquid_security_certificate.zip`.
   - All pinned trust anchors — placeholder or real — are loaded fail-closed: if any cannot be parsed, the Spring Boot application refuses to start.
 - **Signatory-rights registry**: replace the default `FailClosedSignatoryRightsVerifier` with a production `SignatoryRightsVerifier` adapter wired to an authoritative source (Swish agreement registry / Bolagsverket). Configure via `swish.signatory-rights.mode=<your-adapter>`. The fail-closed default will reject every SIGNING request until this is done.
-- **Marvell attestation blob parser**: the Azure / Google TLV blob parsers in this reference implementation rely on simplified assumptions about the Marvell attestation format that is NDA-restricted. The fail-closed behaviour at layout mismatch is correct, but a production deployment using the cloud-HSM paths must replace the parser with one aligned to the vendor specification.
+- **Marvell attestation format**: Marvell's specification is not public. `MarvellAttestation` follows Microsoft's MIT-licensed parser and validator (layout, attribute numbers, firmware 2.x/3.x signature schemes) and Google's sample (gzip, SHA-256 PKCS#1 v1.5, owner chain). Neither vendor tool binds the attestation to a public key; the binding here is the RSA modulus attribute `0x0120` (PKCS#11 `CKA_MODULUS`), which Microsoft's attribute table does not list. Until a real Azure or Google attestation is committed as a fixture and `MarvellAttestation.FORMAT_CONFIRMED_BY_REAL_SAMPLE` is set, both verifiers add `MARVELL_FORMAT_UNCONFIRMED` and never report a valid attestation.
 - **BankID XML-DSig integration test vectors**: the test suite builds its own PKI in-memory with BouncyCastle (see `src/test/java/.../testsupport/TestPki.java`) and asserts fail-closed behaviour. Before production, extend the suite with real BankID test vectors obtained from BankID's development environment.
 - **Reproducibility**: run `mvn -B test` — all unit tests exercise the real PKIX `CertPathValidator` against the pinned root certificate of each verifier with no mocks. See `PEER_REVIEW_GUIDE.md` for the full list of reproducible assertions; the substantive-fix history is preserved in the Git commit log.
 

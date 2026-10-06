@@ -15,7 +15,7 @@ The audience is a **systems / integration engineer** at the FE who has been aske
 | Component | Role | Production-trustable as-is? |
 | --- | --- | --- |
 | `verification/SecurosysVerifier`, `verification/YubicoVerifier` | Vendor-specific HSM attestation verifiers; pin real vendor roots; PKIX-validated chain + signature + non-extractability check | Yes |
-| `verification/AzureHsmVerifier`, `verification/GoogleCloudHsmVerifier` | Cloud-HSM verifiers; pin Marvell LiquidSecurity root | **No** for Azure: every Azure attestation fails with `AZURE_ATTRIBUTES_UNVERIFIED`, because no parser for the Marvell attribute encoding ships. Google: manufacturer chain only, and the gatekeeper (1.5.0) never returns COMPLIANT for it (`GOOGLE_KEY_ORIGIN_UNVERIFIED`). For both, the cert expired 2025-11-16 — rotate before relying on post-expiry attestations; dual-chain owner-root validation not implemented (see verifier SECURITY NOTE) |
+| `verification/AzureHsmVerifier`, `verification/GoogleCloudHsmVerifier`, `verification/MarvellAttestation` | Cloud-HSM verifiers; Marvell roots from Microsoft's validator, Google owner root | **No**: never valid until a real Azure / Google attestation confirms the Marvell format (`MARVELL_FORMAT_UNCONFIRMED`) |
 | `gatekeeper/GatekeeperClient` (interface) + `HttpGatekeeperClient` | The FE → NCA verify/confirm RPC, two-step protocol | Yes — `mode=http` against the NCA's published gatekeeper URL |
 | `gatekeeper/ReceiptVerifier`, `gatekeeper/ReceiptCanonicalizer` | Validates the gatekeeper-signed receipt against the canonical bytes the FE submitted | Yes |
 | `gatekeeper/GatekeeperKeyRegistry` | Trusted set of gatekeeper signing certificates | Yes — populate via `swish.gatekeeper.trusted-keys` |

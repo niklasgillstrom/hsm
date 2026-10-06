@@ -674,7 +674,7 @@ public class AttestationService {
         if (request.getAttestationData() == null || request.getAttestationData().isBlank()) {
             var result = new GoogleCloudHsmVerifier.GoogleAttestationResult();
             result.addError(
-                    "attestationData (base64 of decompressed attestation.dat) is required for Google Cloud HSM");
+                    "attestationData (base64 of attestation.dat) is required for Google Cloud HSM");
             return result;
         }
 

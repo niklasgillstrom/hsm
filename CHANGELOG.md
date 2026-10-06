@@ -92,6 +92,35 @@ Versions before 1.4.0 have no entry here; their history is recorded in
 - **Documented, not changed:** Securosys attestations signed with PSS
   (`CKM_SHA256_RSA_PKCS_PSS`, used in Securosys' own PKCS#11 example) are not
   supported and are rejected. The real fixture is PKCS#1 v1.5.
+- **Azure and Google: Marvell parser rebuilt from the vendors' tools.** Both
+  verifiers parsed a format of their own (2-byte tags, a public-key tag
+  `0x0350`) that matches neither vendor's tool. `AzureHsmVerifier` read JSON
+  fields that `az keyvault key get-attestation` does not write and took the
+  public key from the JSON's JWK, which the HSM does not sign: a genuine
+  attestation of one key, paired with the JWK of another, gave
+  `publicKeyMatch=true`. The new `MarvellAttestation` ports Microsoft's
+  MIT-licensed parser and validator (`Azure/azure-managed-hsm-key-attestation`:
+  firmware 2.x and 3.x layouts, attribute numbers, signature schemes, Marvell
+  roots) and Google's `verify_attestation_chains.py` (gzip, SHA-256 PKCS#1
+  v1.5, owner chain under Hawksbill Root v1 prod). The key is bound only
+  through the RSA modulus inside the signed blob; EXTRACTABLE must be false
+  and NEVER_EXTRACTABLE and LOCAL true. Azure reads the real `az` JSON;
+  Google also checks the owner chain and accepts gzip input.
+- **Marvell roots updated.** The 2015 Marvell root expired 2025-11-16; the
+  roots are now the two in Microsoft's validator: the reissued
+  LiquidSecurity root (2024-2034, same key) and the LiquidSecurity 2 root.
+- **Format gate.** No real Marvell attestation has been run through the
+  parser, and the modulus attribute (`0x0120`, PKCS#11 `CKA_MODULUS`) is not
+  in Microsoft's attribute table. Until a real fixture is committed, both
+  verifiers add `MARVELL_FORMAT_UNCONFIRMED` and never report a valid
+  attestation.
+- **Firmware 2.x signature.** Microsoft's validator compares only the
+  trailing 32 bytes of the raw RSA result with the hash. That is accepted only
+  for public exponents of at least 65537; under e = 3 a cube root modulo
+  2^256 forges it.
+- Tests: `MarvellAttestationTest` (9), `AzureHsmVerifierTest` (6, replacing
+  2), `GoogleCloudHsmVerifierTest` (8, replacing 2).
+  `AzureHsmVerifierTest.jwkNamingTheCsrKeyIsNotABinding` fails on 1.5.0.
 
 ## 1.5.0
 
