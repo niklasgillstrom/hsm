@@ -1,11 +1,21 @@
 server:
   port: 8080
+  # Headers only; the JSON body is bounded by swish.limits below.
+  max-http-request-header-size: 8KB
+  tomcat:
+    # hsm accepts no form-encoded bodies.
+    max-http-form-post-size: 64KB
+    # How much of a rejected body Tomcat reads and discards before closing.
+    max-swallow-size: 1MB
 
 spring:
   application:
     name: hsm
 
 swish:
+  limits:
+    # Maximum request body, enforced by RequestSizeLimitFilter.
+    max-http-request-size: ${SWISH_MAX_REQUEST_SIZE:1MB}
   # Gatekeeper client configuration. The supervisory architecture in
   # Gillstrom (in preparation, CMLJ and CLSR) requires that the financial
   # entity's own verifier is independently witnessed by a gatekeeper
@@ -73,4 +83,5 @@ springdoc:
 
 logging:
   level:
-    eu.gillstrom.hsm: DEBUG
+    # INFO by default; DEBUG is the operator's choice (THREAT_MODEL.md).
+    eu.gillstrom.hsm: INFO

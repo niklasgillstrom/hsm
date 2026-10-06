@@ -324,9 +324,17 @@ public class SecurosysVerifier implements HsmAttestationVerifier {
 
     @Override
     public boolean verifyChain(X509Certificate attestationCert, X509Certificate[] chain) {
-        // Chain validation is performed as part of verifySecurosysAttestation;
-        // this interface entry point is retained for API compatibility only.
-        return true;
+        // The same PKIX validation verifySecurosysAttestation runs. This entry
+        // point returned true for any input until 1.6.0.
+        if (attestationCert == null) {
+            return false;
+        }
+        List<X509Certificate> all = new ArrayList<>();
+        all.add(attestationCert);
+        if (chain != null) {
+            all.addAll(java.util.Arrays.asList(chain));
+        }
+        return verifyCertChain(all.toArray(new X509Certificate[0]));
     }
 
     @Override

@@ -1,10 +1,8 @@
 package eu.gillstrom.hsm.service;
 
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.operator.jcajce.JcaContentVerifierProviderBuilder;
 import org.bouncycastle.pkcs.PKCS10CertificationRequest;
-import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,6 +22,7 @@ import eu.gillstrom.hsm.model.HsmVendor;
 import eu.gillstrom.hsm.model.IssuanceResponse;
 import eu.gillstrom.hsm.model.VerificationResponse;
 import eu.gillstrom.hsm.model.VerificationResponse.CertificateType;
+import eu.gillstrom.hsm.util.Csrs;
 import eu.gillstrom.hsm.util.Fingerprints;
 import eu.gillstrom.hsm.verification.AzureHsmVerifier;
 import eu.gillstrom.hsm.verification.GoogleCloudHsmVerifier;
@@ -35,7 +34,6 @@ import eu.gillstrom.hsm.verification.NShieldVerifier;
 import eu.gillstrom.hsm.verification.SecurosysVerifier;
 import eu.gillstrom.hsm.verification.YubicoVerifier;
 
-import java.io.StringReader;
 import java.io.StringWriter;
 import java.security.PublicKey;
 import java.time.format.DateTimeFormatter;
@@ -452,15 +450,7 @@ public class AttestationService {
     }
 
     private static PublicKey parseCsrPublicKey(String csrPem) throws Exception {
-        String pem = csrPem.trim();
-        if (!pem.contains("BEGIN")) {
-            pem = "-----BEGIN CERTIFICATE REQUEST-----\n" + csrPem
-                    + "\n-----END CERTIFICATE REQUEST-----";
-        }
-        try (PEMParser parser = new PEMParser(new StringReader(pem))) {
-            PKCS10CertificationRequest csr = (PKCS10CertificationRequest) parser.readObject();
-            return new JcaPKCS10CertificationRequest(csr).getPublicKey();
-        }
+        return Csrs.publicKey(csrPem);
     }
 
     private static String toPublicKeyPem(PublicKey publicKey) {
@@ -939,13 +929,7 @@ public class AttestationService {
     }
 
     private PKCS10CertificationRequest parseCsr(String csrInput) throws Exception {
-        String pem = csrInput.trim();
-        if (!pem.contains("BEGIN")) {
-            pem = "-----BEGIN CERTIFICATE REQUEST-----\n" + csrInput + "\n-----END CERTIFICATE REQUEST-----";
-        }
-        try (PEMParser parser = new PEMParser(new StringReader(pem))) {
-            return (PKCS10CertificationRequest) parser.readObject();
-        }
+        return Csrs.parse(csrInput);
     }
 
     /**
@@ -955,13 +939,7 @@ public class AttestationService {
      * over, on both sides.
      */
     private static byte[] csrDerBytes(String csrInput) {
-        String body = csrInput
-                .replace("-----BEGIN CERTIFICATE REQUEST-----", "")
-                .replace("-----END CERTIFICATE REQUEST-----", "")
-                .replace("-----BEGIN NEW CERTIFICATE REQUEST-----", "")
-                .replace("-----END NEW CERTIFICATE REQUEST-----", "")
-                .replaceAll("\\s+", "");
-        return Base64.getDecoder().decode(body);
+        return Csrs.der(csrInput);
     }
 
     /**
@@ -984,11 +962,7 @@ public class AttestationService {
     }
 
     private PublicKey extractPublicKey(PKCS10CertificationRequest csr) throws Exception {
-        var pkInfo = csr.getSubjectPublicKeyInfo();
-        var keySpec = new java.security.spec.X509EncodedKeySpec(pkInfo.getEncoded());
-        String algorithm = pkInfo.getAlgorithm().getAlgorithm().getId();
-        String keyAlg = algorithm.startsWith("1.2.840.10045") ? "EC" : "RSA";
-        return java.security.KeyFactory.getInstance(keyAlg).generatePublic(keySpec);
+        return Csrs.publicKey(csr);
     }
 
     /**

@@ -80,7 +80,7 @@ The companion repository `gatekeeper` carries the supervisory side and includes 
   "bankIdPersonalNumber": "19880807****",
   "bankIdName": "Test Testsson",
   "bankIdUsrVisibleData": "Bolagsnamn AB (556954-1234) ger härmed Teknisk leverantör AB (556964-1234) fullmakt att hämta fyra (4) Swish-certifikat för Swish-nummer 1234567890 kopplat till TL-nummer 9876543210.",
-  "bankIdUsrNonVisibleData": "0b7ee6f76c72db770ed5c7fb2d01f9d6a5e9e3160fe9e4f37c678167d055af1e",
+  "bankIdUsrNonVisibleData": "hsm-csr:v2;org=5569541234;swish=1234567890;type=SIGNING;csr-sha256=0b7ee6f76c72db770ed5c7fb2d01f9d6a5e9e3160fe9e4f37c678167d055af1e",
   "bankIdRelyingPartyName": "Teknisk leverantör AB",
   "bankIdRelyingPartyOrgNumber": "5569641234",
   "bankIdSignatureTime": "2026-01-15T12:00:00Z",
@@ -113,7 +113,7 @@ The companion repository `gatekeeper` carries the supervisory side and includes 
   "bankIdPersonalNumber": "19880807****",
   "bankIdName": "Test Testsson",
   "bankIdUsrVisibleData": "Bolagsnamn AB (556954-1234) ger härmed Teknisk leverantör AB (556964-1234) fullmakt att hämta fyra (4) Swish-certifikat för Swish-nummer 1234567890 kopplat till TL-nummer 9876543210.",
-  "bankIdUsrNonVisibleData": "0b7ee6f76c72db770ed5c7fb2d01f9d6a5e9e3160fe9e4f37c678167d055af1e",
+  "bankIdUsrNonVisibleData": "hsm-csr:v2;org=5569541234;swish=1234567890;type=TRANSPORT;csr-sha256=0b7ee6f76c72db770ed5c7fb2d01f9d6a5e9e3160fe9e4f37c678167d055af1e",
   "bankIdRelyingPartyName": "Teknisk leverantör AB",
   "bankIdRelyingPartyOrgNumber": "5569641234",
   "bankIdSignatureTime": "2026-01-15T12:00:00Z",
@@ -205,6 +205,7 @@ The gatekeeper and issuance components are pluggable via `application.yaml` / en
 | `swish.gatekeeper.country-code` | `SE` | ISO 3166-1 alpha-2 of the operating NCA |
 | `swish.gatekeeper.timeout-ms` | `5000` | site policy |
 | `swish.gatekeeper.trusted-keys` | empty | newline- or comma-separated PEM certificates of authoritative gatekeeper signing keys, including retired keys still relevant for receipts within the DORA Article 28(6) 5-year retention window |
+| `swish.limits.max-http-request-size` | `1MB` | maximum request body (`RequestSizeLimitFilter`); larger requests are answered 413 |
 | `swish.bankid.max-signature-age` | `PT15M` | ISO-8601 duration; a BankID signature whose OCSP `producedAt` is older is refused with `BANKID_SIGNATURE_TOO_OLD` |
 | `swish.bankid.allowed-relying-parties` | empty (every request refused, logged at `WARN`) | comma-separated organisation numbers of the BankID relying parties (the technical suppliers) whose BankID orders may authorise a request; any other is refused with `BANKID_RELYING_PARTY_NOT_ALLOWED` |
 | `swish.key-policy.allowed-keys` | `RSA-4096` | comma-separated allow-list of `RSA-<bits>` / `EC-<curve>` (SEC names, e.g. `EC-secp384r1`); any other key is refused with `KEY_POLICY_VIOLATION` |

@@ -167,4 +167,27 @@ class SecurosysVerifierTest {
         assertThat(r.getErrors()).anyMatch(e -> e.toLowerCase().contains("no certificates"));
         assertThat(r.isValid()).isFalse();
     }
+
+    @Test
+    void verifyChainValidatesAgainstThePinnedRoot() throws Exception {
+        // It returned true for any input until 1.6.0.
+        var node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(java.nio.file.Files.readString(java.nio.file.Path.of("examples/securosys/request.json")));
+        java.util.List<X509Certificate> real = new java.util.ArrayList<>();
+        var cf = java.security.cert.CertificateFactory.getInstance("X.509");
+        for (var pem : node.get("attestationCertChain")) {
+            real.add((X509Certificate) cf.generateCertificate(new java.io.ByteArrayInputStream(
+                    pem.asText().getBytes(StandardCharsets.UTF_8))));
+        }
+        assertThat(verifier.verifyChain(real.get(0), real.subList(1, real.size()).toArray(new X509Certificate[0])))
+                .isTrue();
+
+        var fakeLeaf = (X509Certificate) cf.generateCertificate(new java.io.ByteArrayInputStream(
+                chainPem.get(0).getBytes(StandardCharsets.UTF_8)));
+        var fakeRest = new X509Certificate[] {
+                (X509Certificate) cf.generateCertificate(new java.io.ByteArrayInputStream(chainPem.get(1).getBytes(StandardCharsets.UTF_8))),
+                (X509Certificate) cf.generateCertificate(new java.io.ByteArrayInputStream(chainPem.get(2).getBytes(StandardCharsets.UTF_8)))};
+        assertThat(verifier.verifyChain(fakeLeaf, fakeRest)).isFalse();
+        assertThat(verifier.verifyChain(null, fakeRest)).isFalse();
+        assertThat(verifier.verifyChain(real.get(0), null)).as("the leaf alone does not reach the root").isFalse();
+    }
 }

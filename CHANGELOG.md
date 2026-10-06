@@ -123,6 +123,41 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   never reached the JDK client.
 - All 29 guard mutants of the receipt and transport changes are killed.
 
+- **No request size limit.** Spring Boot bounds form and multipart bodies,
+  not JSON, so a request of any size was read in full; `THREAT_MODEL.md`
+  said bodies were limited to about 2 MB. `RequestSizeLimitFilter` (as in
+  gatekeeper and railgate) caps bodies at
+  `swish.limits.max-http-request-size` (1 MB) and headers at 8 KB
+  (`RequestSizeLimitFilterTest`, and `RequestSizeLimitWiringTest` on a
+  running server).
+- **One reading of the CSR.** CSRs were read in four places: the BankID
+  binding hash stripped every PEM header and decoded what was left, the
+  signature check read the first PEM block, and mock issuance knew only
+  the `CERTIFICATE REQUEST` label. Two PEM blocks in one field were hashed
+  together but only the first was verified, and a CSR labelled `NEW
+  CERTIFICATE REQUEST` passed verification and failed at issuance. `Csrs`
+  now accepts exactly one block (either label, the same at both ends) or
+  bare base64, and every step uses its DER (`CsrsTest`,
+  `MockIssuanceClientTest.aCsrWithTheNewCertificateRequestLabelIsIssued`).
+- **`SecurosysVerifier.verifyChain` returned true for any input.** It is
+  not called by the verification flow, but it is the interface's chain
+  check; it now runs the same PKIX validation under the pinned root
+  (`verifyChainValidatesAgainstThePinnedRoot`). The same fix is in
+  gatekeeper.
+- **The mock gatekeeper accepted a confirmation nonce more than once** and
+  kept its approvals in two unsynchronised maps. It now spends the nonce
+  atomically, as gatekeeper does (`MockGatekeeperClientConcurrencyTest`;
+  with the previous code a nonce confirmed twice, and up to sixteen racing
+  confirms succeeded).
+- **Logging defaulted to DEBUG** in the shipped `application.yaml`, where
+  `THREAT_MODEL.md` describes DEBUG as the operator's choice; it is INFO.
+- **Dead code removed:** the superseded `witness` package and its test,
+  which were empty stubs marked for deletion, and the unused
+  `client.GatekeeperClient` component.
+- **README examples** showed `bankIdUsrNonVisibleData` as a bare hash, which
+  would be refused with `BANKID_NOT_BOUND_TO_REQUEST`; they now show the
+  binding string.
+
 ### Verifiers
 
 - **Securosys key origin is read from the attestation.** The verifier never

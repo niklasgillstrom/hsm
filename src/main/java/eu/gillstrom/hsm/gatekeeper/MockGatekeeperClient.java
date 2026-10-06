@@ -28,7 +28,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.Date;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -67,13 +66,18 @@ public class MockGatekeeperClient implements GatekeeperClient {
     private String signingCertificatePem;
     private String fingerprint;
 
-    /** Per-verificationId memo of (publicKey fingerprint) so confirm can check the loop. */
-    private final Map<String, String> approvedKeyByVerificationId = new LinkedHashMap<>();
+    /**
+     * Per verificationId, the approved public-key fingerprint (so confirm can
+     * check the loop) and the confirmation nonce bound at verify time, which
+     * becomes null once a confirm has spent it. Mirrors gatekeeper's Step-7
+     * rule: a confirm whose nonce does not match, or whose nonce was already
+     * spent, is rejected. Concurrent: verify and confirm run on request threads,
+     * and two maps updated separately could be seen half-written.
+     */
+    private record Approval(String publicKeyFingerprint, String nonce) {
+    }
 
-    /** Per-verificationId memo of confirmation nonce. Mirrors the gatekeeper's
-     *  Step-7 replay-binding: a confirm whose submitted nonce does not match the
-     *  one bound here at verify time is rejected. */
-    private final Map<String, String> approvedNonceByVerificationId = new LinkedHashMap<>();
+    private final Map<String, Approval> approvals = new java.util.concurrent.ConcurrentHashMap<>();
 
     private static final java.security.SecureRandom NONCE_RNG = new java.security.SecureRandom();
 
@@ -158,8 +162,7 @@ public class MockGatekeeperClient implements GatekeeperClient {
             sig.update(canonical);
             unsigned.setSignature(Base64.getEncoder().encodeToString(sig.sign()));
 
-            approvedKeyByVerificationId.put(verificationId, publicKeyFingerprint);
-            approvedNonceByVerificationId.put(verificationId, confirmationNonce);
+            approvals.put(verificationId, new Approval(publicKeyFingerprint, confirmationNonce));
             return unsigned;
         } catch (Exception e) {
             throw new GatekeeperException(
@@ -172,8 +175,9 @@ public class MockGatekeeperClient implements GatekeeperClient {
         if (request == null) {
             throw new GatekeeperException("confirm called with null request");
         }
-        String expected = approvedKeyByVerificationId.get(request.getVerificationId());
-        String expectedNonce = approvedNonceByVerificationId.get(request.getVerificationId());
+        Approval approval = request.getVerificationId() == null ? null : approvals.get(request.getVerificationId());
+        String expected = approval == null ? null : approval.publicKeyFingerprint();
+        String expectedNonce = approval == null ? null : approval.nonce();
         String processedAt = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
 
         if (expected == null) {
@@ -187,11 +191,14 @@ public class MockGatekeeperClient implements GatekeeperClient {
         }
 
         // Step-7 replay binding: nonce must match the one bound at verify time.
+        // Spending the nonce is the atomic replace: of two racing confirms
+        // with the same nonce only one replaces the unspent approval.
         String submitted = request.getConfirmationNonce();
         if (expectedNonce == null || submitted == null
                 || !java.security.MessageDigest.isEqual(
                         expectedNonce.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                        submitted.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+                        submitted.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                || !approvals.replace(request.getVerificationId(), approval, new Approval(expected, null))) {
             log.warn("MockGatekeeperClient: nonce mismatch on confirm for verificationId={} "
                     + "— possible Step-7 replay attempt", request.getVerificationId());
             throw new GatekeeperException(

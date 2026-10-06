@@ -131,7 +131,7 @@
 ### Residual risks
 
 - **Masked PNR is still partially identifying.** YYMMDD is recoverable and narrows the Swedish population materially. Sufficient for operational logs; not sufficient for general-purpose data sharing.
-- **Callers controlling logging levels.** A caller who sets `logging.level.eu.gillstrom.hsm=DEBUG` may capture verbose internal state. This is a deliberate trade-off for operational debuggability.
+- **Callers controlling logging levels.** A caller who sets `logging.level.eu.gillstrom.hsm=DEBUG` may capture verbose internal state. This is a deliberate trade-off for operational debuggability. Until 1.6.0 the shipped `application.yaml` set DEBUG itself; it now sets INFO, so DEBUG is the operator's choice as this paragraph assumed.
 
 ---
 
@@ -153,12 +153,14 @@
 
 - **XXE protections** (see Tampering).
 - **PKIX path length limits** — `PKIXParameters` default `maxPathLength` is enforced.
-- **Structural OCSP parsing** — iterating `BasicOCSPResp.getResponses()` is bounded by the response size; the library matches on `SerialNumber` equality only.
+- **Structural OCSP parsing** — iterating `BasicOCSPResp.getResponses()` is bounded by the response size; an entry matches on its serial number and its issuer name and key hashes (since 1.6.0; before, on the serial number only).
+- **Request size limit** *(1.6.0)* — `RequestSizeLimitFilter` caps request bodies at `swish.limits.max-http-request-size` (1 MB by default) and headers at 8 KB.
 - **No `Runtime.exec`, no `ObjectInputStream`**. The library has no deserialisation surface.
 
 ### Residual risks
 
-- **No request size limit in the library.** Callers (Spring MVC `AttestationController`) inherit whatever `server.tomcat.max-http-form-post-size` and body size limits the ambient configuration imposes. Default Spring Boot settings are reasonable (~2 MB); production deployments should review.
+- **Request size** *(closed in 1.6.0)*. This section said callers inherit "reasonable" Spring Boot body limits of about 2 MB. Spring Boot bounds form-encoded and multipart bodies only, not JSON, so a request of any size was read in full (a 30 MB body was accepted). `RequestSizeLimitFilter` now bounds it.
+- **No caller authentication.** `AttestationController` has no authentication of its own. The authority to have a certificate issued comes from the signed BankID payload (an allowed relying party, an authorised signatory, the request binding) and the attestation, not from the caller's identity, so an unauthenticated caller can only submit requests that someone authorised. It can still make the service spend work and gatekeeper calls on requests that fail; a deployment exposes the API behind its own authentication or gateway.
 - **No rate limiting.** The library provides no throttling. A deployer fronting this with a rate-limiter filter closes the gap. The sibling gatekeeper repo acknowledges the same.
 
 ---

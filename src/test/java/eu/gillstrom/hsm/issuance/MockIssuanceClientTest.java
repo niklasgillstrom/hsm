@@ -103,4 +103,23 @@ class MockIssuanceClientTest {
         }
         return file;
     }
+
+    @Test
+    void aCsrWithTheNewCertificateRequestLabelIsIssued() throws Exception {
+        // It passed verification and failed here until 1.6.0.
+        MockIssuanceClient client = new MockIssuanceClient();
+        client.init();
+        java.security.KeyPair kp = eu.gillstrom.hsm.testsupport.TestPki.newRsaKeyPair(2048);
+        String pem = eu.gillstrom.hsm.testsupport.TestPki.csrPem(kp, "Test", kp.getPrivate())
+                .replace("CERTIFICATE REQUEST", "NEW CERTIFICATE REQUEST");
+        eu.gillstrom.hsm.model.CertificateRequest request = new eu.gillstrom.hsm.model.CertificateRequest();
+        request.setCsr(pem);
+
+        var issued = client.issue(request, "VID");
+
+        var cert = (java.security.cert.X509Certificate) java.security.cert.CertificateFactory.getInstance("X.509")
+                .generateCertificate(new java.io.ByteArrayInputStream(
+                        issued.certificatePem().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        org.assertj.core.api.Assertions.assertThat(cert.getPublicKey().getEncoded()).isEqualTo(kp.getPublic().getEncoded());
+    }
 }
