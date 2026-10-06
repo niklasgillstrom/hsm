@@ -225,6 +225,8 @@ public class IssuanceResponse {
     @Builder
     public static class VerifyResponseSummary {
         private String verificationId;
+        /** Signed field (third in the v2 canonical form); needed to re-verify the receipt. */
+        private String confirmationNonce;
         private boolean compliant;
         private Instant verificationTimestamp;
         private String publicKeyFingerprint;
@@ -236,10 +238,18 @@ public class IssuanceResponse {
         private String supplierName;
         private String keyPurpose;
         private String countryCode;
+        /**
+         * Whether the receipt carried key properties at all. The canonical form
+         * renders an absent object as empty fields, not as {@code false}, so the
+         * flattened booleans below cannot express absence on their own.
+         */
+        private boolean keyPropertiesPresent;
         private boolean generatedOnDevice;
         private boolean exportable;
         private boolean attestationChainValid;
         private boolean publicKeyMatchesAttestation;
+        /** Whether the receipt carried a DORA mapping at all; see {@link #keyPropertiesPresent}. */
+        private boolean doraCompliancePresent;
         private boolean article5_2b;
         private boolean article6_10;
         private boolean article9_3c;
@@ -260,6 +270,7 @@ public class IssuanceResponse {
             VerifyResponse.DoraCompliance dc = r.getDoraCompliance();
             return VerifyResponseSummary.builder()
                     .verificationId(r.getVerificationId())
+                    .confirmationNonce(r.getConfirmationNonce())
                     .compliant(r.isCompliant())
                     .verificationTimestamp(r.getVerificationTimestamp())
                     .publicKeyFingerprint(r.getPublicKeyFingerprint())
@@ -271,6 +282,8 @@ public class IssuanceResponse {
                     .supplierName(r.getSupplierName())
                     .keyPurpose(r.getKeyPurpose())
                     .countryCode(r.getCountryCode())
+                    .keyPropertiesPresent(kp != null)
+                    .doraCompliancePresent(dc != null)
                     .generatedOnDevice(kp != null && kp.isGeneratedOnDevice())
                     .exportable(kp != null && kp.isExportable())
                     .attestationChainValid(kp != null && kp.isAttestationChainValid())
@@ -286,6 +299,39 @@ public class IssuanceResponse {
                     .signingCertificatePem(r.getSigningCertificate())
                     .errors(r.getErrors())
                     .warnings(r.getWarnings())
+                    .build();
+        }
+
+        /**
+         * Rebuild the receipt from this record, so that an auditor can run
+         * {@link eu.gillstrom.hsm.gatekeeper.ReceiptVerifier#verify} on it
+         * without access to the original wire response.
+         */
+        public VerifyResponse toVerifyResponse() {
+            return VerifyResponse.builder()
+                    .verificationId(verificationId)
+                    .confirmationNonce(confirmationNonce)
+                    .compliant(compliant)
+                    .verificationTimestamp(verificationTimestamp)
+                    .publicKeyFingerprint(publicKeyFingerprint)
+                    .publicKeyAlgorithm(publicKeyAlgorithm)
+                    .hsmVendor(hsmVendor)
+                    .hsmModel(hsmModel)
+                    .hsmSerialNumber(hsmSerialNumber)
+                    .supplierIdentifier(supplierIdentifier)
+                    .supplierName(supplierName)
+                    .keyPurpose(keyPurpose)
+                    .countryCode(countryCode)
+                    .keyProperties(!keyPropertiesPresent ? null
+                            : new VerifyResponse.KeyProperties(generatedOnDevice, exportable,
+                                    attestationChainValid, publicKeyMatchesAttestation))
+                    .doraCompliance(!doraCompliancePresent ? null
+                            : new VerifyResponse.DoraCompliance(article5_2b, article6_10,
+                                    article9_3c, article9_3d, article9_4d, article28_1a, doraSummary))
+                    .signature(signatureBase64)
+                    .signingCertificate(signingCertificatePem)
+                    .errors(errors)
+                    .warnings(warnings)
                     .build();
         }
     }

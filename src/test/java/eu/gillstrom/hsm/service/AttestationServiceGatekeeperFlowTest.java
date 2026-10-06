@@ -89,6 +89,19 @@ class AttestationServiceGatekeeperFlowTest {
 
     @Test
     @EnabledIf("yubicoFixturePresent")
+    void retainedReceiptReverifiesFromTheAuditRecord() throws Exception {
+        IssuanceResponse r = service("SE").verifyAndIssue(signingRequest());
+
+        assertThat(r.getStage()).as("errors: %s", r.getErrors())
+                .isEqualTo(IssuanceResponse.Stage.VERIFIED_ISSUED_AND_CONFIRMED);
+        VerifyResponse rebuilt = r.getVerifyReceipt().toVerifyResponse();
+        assertThat(new ReceiptVerifier(registry).verify(rebuilt))
+                .as("the audit record must carry every signed receipt field")
+                .isTrue();
+    }
+
+    @Test
+    @EnabledIf("yubicoFixturePresent")
     void verifyRequestCarriesTheConfiguredCountryCode() throws Exception {
         IssuanceResponse r = service("NO").verifyAndIssue(signingRequest());
 

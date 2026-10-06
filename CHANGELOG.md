@@ -23,6 +23,18 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   change). `AttestationServiceRequestBindingTest` asserted that a TRANSPORT
   request was valid while signatory rights were UNKNOWN; it now confirms
   signatory rights with a stub, since it tests the request bindings only.
+- **The retained receipt can be re-verified.** `IssuanceResponse.VerifyResponseSummary`,
+  the audit record of the gatekeeper receipt, left out `confirmationNonce`,
+  which is the third field of the signed v2 canonical form, and stored absent
+  `keyProperties` / `doraCompliance` as `false` where the canonical form
+  writes empty fields. The record therefore could not rebuild the signed
+  bytes, and `ReceiptVerifier` rejected every retained receipt. The summary
+  now carries the nonce and whether each sub-object was present, and
+  `toVerifyResponse()` rebuilds the receipt for verification. Tests:
+  `VerifyResponseSummaryTest` (2) and
+  `AttestationServiceGatekeeperFlowTest.retainedReceiptReverifiesFromTheAuditRecord`,
+  all three failing before the change. Retention itself is still the
+  deployer's: nothing in this repository persists the `IssuanceResponse`.
 
 ## 1.5.0
 
