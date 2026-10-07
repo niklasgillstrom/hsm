@@ -44,6 +44,58 @@ class BankIdSignatureVerificationTest {
     }
 
     @Test
+    @DisplayName("The result reports what was verified: signer, relying party, signing time, chain")
+    void theResultReportsWhatWasVerified() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        java.util.Date producedAt = new java.util.Date((System.currentTimeMillis() / 1000 - 60) * 1000);
+
+        BankIdService.BankIdResult r = service.verify(sig, fx.ocspProducedAt(sig, producedAt));
+
+        assertThat(r.isValid()).as("verification error: %s", r.getError()).isTrue();
+        assertThat(r.isSignatureValid()).isTrue();
+        assertThat(r.getError()).isNull();
+        assertThat(r.getName()).isEqualTo(BankIdFixture.TEST_NAME);
+        assertThat(r.getRelyingPartyName()).isEqualTo("Testbolaget");
+        assertThat(r.getRelyingPartyOrgNumber()).isEqualTo("5566778899");
+        assertThat(r.getSignatureTime()).isEqualTo(producedAt.toInstant());
+        assertThat(r.isCertificateChainValid()).isTrue();
+        assertThat(r.getCertificateChainErrors()).isEmpty();
+        assertThat(r.getCertificateCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("A response signed by an expired responder certificate is rejected")
+    void expiredResponderIsRejected() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        BankIdService.BankIdResult r = service.verify(sig, fx.ocspExpiredResponder(sig));
+
+        assertThat(r.isValid()).isFalse();
+        assertThat(r.getError()).startsWith("OCSP verification failed");
+    }
+
+    @Test
+    @DisplayName("A response whose nextUpdate has passed is stale")
+    void pastNextUpdateIsStale() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        BankIdService.BankIdResult r = service.verify(sig,
+                fx.ocspNextUpdate(sig, new java.util.Date(System.currentTimeMillis() - 60_000L)));
+
+        assertThat(r.isValid()).isFalse();
+        assertThat(r.getError()).contains("stale");
+        assertThat(service.verify(sig,
+                fx.ocspNextUpdate(sig, new java.util.Date(System.currentTimeMillis() + 60_000L))).isValid()).isTrue();
+    }
+
+    @Test
+    @DisplayName("A nonce that is exactly the SHA-1 of the signature binds")
+    void exactLengthNonceBinds() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        BankIdService.BankIdResult r = service.verify(sig, fx.ocspExactNonce(sig));
+
+        assertThat(r.isValid()).as("verification error: %s", r.getError()).isTrue();
+    }
+
+    @Test
     @DisplayName("Revoked certificate is rejected")
     void revokedIsRejected() throws Exception {
         String sig = fx.signedResponseBase64("Jag godkanner avtalet");
@@ -148,6 +200,8 @@ class BankIdSignatureVerificationTest {
 
         assertThat(r.isValid()).isFalse();
         assertThat(r.getError()).contains("XML-DSig");
+        assertThat(r.isSignatureValid()).isFalse();
+        assertThat(r.isCertificateChainValid()).as("the chain itself is the genuine one").isTrue();
     }
 
     @Test
@@ -241,6 +295,9 @@ class BankIdSignatureVerificationTest {
         BankIdService.BankIdResult r = other.verify(sig, fx.ocspResponseBase64(sig));
 
         assertThat(r.isValid()).isFalse();
+        // Without a validated path the issuing CA is unknown, so the OCSP
+        // responder cannot be checked against it: the refusal comes from there.
+        assertThat(r.getError()).startsWith("OCSP verification failed");
     }
 
     @Test

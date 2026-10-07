@@ -131,10 +131,16 @@ public final class TestPki {
     public static X509Certificate ocspResponder(
             KeyPair subjectKp, String subjectCn,
             X500Name issuerDn, PrivateKey signingKey) throws Exception {
-        X500Name subject = new X500Name("CN=" + subjectCn);
         long now = System.currentTimeMillis();
-        Date notBefore = new Date(now - 60_000L);
-        Date notAfter = new Date(now + 3600_000L);
+        return ocspResponder(subjectKp, subjectCn, issuerDn, signingKey,
+                new Date(now - 60_000L), new Date(now + 3600_000L));
+    }
+
+    /** As above, valid from {@code notBefore} to {@code notAfter}. */
+    public static X509Certificate ocspResponder(
+            KeyPair subjectKp, String subjectCn,
+            X500Name issuerDn, PrivateKey signingKey, Date notBefore, Date notAfter) throws Exception {
+        X500Name subject = new X500Name("CN=" + subjectCn);
         X509v3CertificateBuilder b = new JcaX509v3CertificateBuilder(
                 issuerDn, nextSerial(), notBefore, notAfter, subject, subjectKp.getPublic());
         b.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
