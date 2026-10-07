@@ -10,9 +10,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * The one reading of a submitted CSR: the bytes hashed for the BankID
- * binding, the request whose signature is checked, and the key that is
- * attested and certified all come from the same DER.
+ * The one reading of a submitted CSR: the request whose signature is
+ * checked and the key that is attested and certified come from the same DER.
  *
  * <p>Accepted input is exactly one PEM block, with either the
  * {@code CERTIFICATE REQUEST} or the {@code NEW CERTIFICATE REQUEST} label

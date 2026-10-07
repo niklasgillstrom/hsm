@@ -271,7 +271,10 @@
                         First run downloads the NVD database (~150 MB, cached in
                         ~/.m2) unauthenticated; that is slow but works. To use an
                         NVD API key, pass it on the command line:
-                        mvn -Dnvd.api.key=... org.owasp:dependency-check-maven:check
+                        NVD_API_KEY=... mvn -Powasp verify -DnvdApiKeyEnvironmentVariable=NVD_API_KEY
+                        (the plugin reads the properties nvdApiKey and
+                        nvdApiKeyEnvironmentVariable, not nvd.api.key; the
+                        environment-variable form keeps the key out of debug logs)
                         Do not wire it through <nvdApiKey>${env.X}</nvdApiKey> —
                         an unset variable becomes an empty key, which NVD rejects.
                         Pinned to 12.2.2: 13.0.0 cannot run without a key at all
@@ -298,6 +301,45 @@
                                 </goals>
                             </execution>
                         </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <!--
+                Mutation testing with PIT: mvn -Ppit test-compile org.pitest:pitest-maven:mutationCoverage
+                Mutates the security-relevant production code and fails the
+                build when the mutation score falls below the threshold.
+                Reports are written to target/pit-reports/.
+            -->
+            <id>pit</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.pitest</groupId>
+                        <artifactId>pitest-maven</artifactId>
+                        <version>1.30.0</version>
+                        <dependencies>
+                            <dependency>
+                                <groupId>org.pitest</groupId>
+                                <artifactId>pitest-junit5-plugin</artifactId>
+                                <version>1.2.3</version>
+                            </dependency>
+                        </dependencies>
+                        <configuration>
+                            <targetClasses>
+                                <param>eu.gillstrom.hsm.*</param>
+                            </targetClasses>
+                            <targetTests>
+                                <param>eu.gillstrom.hsm.*</param>
+                            </targetTests>
+                            <threads>4</threads>
+                            <timestampedReports>false</timestampedReports>
+                            <outputFormats>
+                                <param>HTML</param>
+                                <param>CSV</param>
+                            </outputFormats>
+                        </configuration>
                     </plugin>
                 </plugins>
             </build>

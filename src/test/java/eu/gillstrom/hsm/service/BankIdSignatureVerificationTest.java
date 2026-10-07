@@ -129,6 +129,28 @@ class BankIdSignatureVerificationTest {
     }
 
     @Test
+    @DisplayName("A signed payload altered after signing is rejected")
+    void payloadAlteredAfterSigningIsRejected() throws Exception {
+        String mandate = new BankIdService.Mandate("5569743098", "1231015932", 1).canonical();
+        String sig = fx.signedResponseBoundTo("Jag godkanner (1) certifikat", mandate);
+        String xml = new String(java.util.Base64.getDecoder().decode(sig), java.nio.charset.StandardCharsets.UTF_8);
+        java.util.function.Function<String, String> b64 = s -> java.util.Base64.getEncoder()
+                .encodeToString(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        // The signatory approved one certificate; the payload now claims 99.
+        String raisedCount = xml.replace(b64.apply(mandate),
+                b64.apply(new BankIdService.Mandate("5569743098", "1231015932", 99).canonical()));
+        assertThat(raisedCount).isNotEqualTo(xml);
+        String forged = java.util.Base64.getEncoder()
+                .encodeToString(raisedCount.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        assertThat(service.verify(sig, fx.ocspResponseBase64(sig)).isValid()).isTrue();
+        BankIdService.BankIdResult r = service.verify(forged, fx.ocspResponseBase64(forged));
+
+        assertThat(r.isValid()).isFalse();
+        assertThat(r.getError()).contains("XML-DSig");
+    }
+
+    @Test
     @DisplayName("The mandate in usrNonVisibleData is read from the signed payload")
     void mandateIsCarriedInSignedPayload() throws Exception {
         String mandate = new BankIdService.Mandate("5569743098", "1231015932", 4).canonical();

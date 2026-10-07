@@ -26,8 +26,10 @@ import java.util.List;
  * the operating NCA, in Sweden Finansinspektionen).
  *
  * <p>Note: the wire format submits the <em>public key</em>, not a CSR.
- * Subject DN, BankID material, organisation numbers and other surrounding
- * KYC metadata are intentionally excluded — the gatekeeper certifies the
+ * Subject DN, BankID material, the Swish number and other surrounding KYC
+ * metadata are excluded; the organisation number is sent as
+ * {@code supplierIdentifier} and the BankID relying party's name as
+ * {@code supplierName}, which the receipt echoes — the gatekeeper certifies the
  * cryptographic HSM-attestation property only, not the financial entity's
  * own KYC checks.
  */
@@ -50,7 +52,10 @@ public class VerifyRequest {
     /** PEM-encoded chain (excluding manufacturer root, which the gatekeeper pins). */
     private List<String> attestationCertChain;
 
-    /** Optional: orgnr of the technical supplier whose key is being attested. */
+    /**
+     * Optional. hsm sends the request's organisation number, the company the
+     * certificate is for (AttestationService.buildVerifyRequest).
+     */
     private String supplierIdentifier;
 
     /** Optional: human-readable supplier name. */

@@ -52,6 +52,21 @@ class ReceiptVerifierAlgorithmTest {
     }
 
     @Test
+    void aReceiptSignedByAKeyOutsideTheRegistryIsRefused() throws Exception {
+        // The receipt is correctly signed and advertises the certificate of
+        // the key that signed it, but that key is not a registered gatekeeper
+        // key: anyone can mint such a receipt.
+        KeyPair registered = TestPki.newRsaKeyPair(2048);
+        X509Certificate registeredCert = TestPki.selfSignedCa(registered, "Registered gatekeeper");
+        KeyPair forger = TestPki.newRsaKeyPair(2048);
+        X509Certificate forgerCert = TestPki.selfSignedCa(forger, "Registered gatekeeper");
+        ReceiptVerifier verifier = new ReceiptVerifier(new GatekeeperKeyRegistry(TestPki.toPem(registeredCert)));
+
+        assertThat(verifier.verify(receipt(registered, registeredCert, "SHA256withRSA"))).isTrue();
+        assertThat(verifier.verify(receipt(forger, forgerCert, "SHA256withRSA"))).isFalse();
+    }
+
+    @Test
     void theDefaultIsSha256WithRsa() throws Exception {
         KeyPair kp = TestPki.newRsaKeyPair(2048);
         X509Certificate cert = TestPki.selfSignedCa(kp, "RSA gatekeeper");

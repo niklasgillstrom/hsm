@@ -47,8 +47,8 @@ public class IssuanceResponse {
         /** Local pre-checks (CSR / BankID / signatory rights / attestation) failed. */
         REJECTED_LOCAL_VERIFICATION,
         /**
-         * Everything verified, but the BankID signature had already been used
-         * for an issuance; nothing was issued.
+         * Everything verified, but the BankID signature's mandate had already
+         * been used for as many issuances as it states; nothing was issued.
          */
         REJECTED_BANKID_ALREADY_USED,
         /** Gatekeeper verify call could not be completed (transport, configuration). */
@@ -82,10 +82,12 @@ public class IssuanceResponse {
         ISSUED_BUT_GATEKEEPER_CONFIRM_FAILED,
         /**
          * Anomalous: certificate was issued and the gatekeeper answered the
-         * confirm call, but the answer does not close the loop — a mismatched
-         * {@code verificationId}, {@code loopClosed=false}, or an approval
-         * registry that ended in a state other than
-         * {@code VERIFIED_AND_ISSUED}. Distinguished from
+         * confirm call, but the answer does not close the loop: a signature
+         * that does not verify under a trusted gatekeeper key, a mismatched
+         * {@code verificationId}, no or another registry status than
+         * {@code VERIFIED_AND_ISSUED}, {@code loopClosed=false},
+         * {@code publicKeyMatch} not true, or a confirmed public key other
+         * than the issued certificate's. Distinguished from
          * {@link #ISSUED_BUT_GATEKEEPER_CONFIRM_FAILED} because here the
          * gatekeeper did respond: the supervisory record contradicts the
          * issuance rather than being absent.

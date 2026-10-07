@@ -18,13 +18,13 @@ import java.util.StringJoiner;
  * pipe character so ambiguity between field separators and field contents
  * is impossible. Null fields are rendered as the empty string; boolean fields
  * render as {@code true} / {@code false}; instants as ISO-8601 with offset
- * {@code Z}. A {@code v1} version marker is prefixed so that future canonical
- * changes can be introduced non-ambiguously.
+ * {@code Z}. A version marker ({@code v2}, see {@link #CANONICAL_VERSION})
+ * is prefixed so that future canonical changes can be introduced
+ * non-ambiguously.
  *
  * <p>If a future receipt field becomes decision-relevant it MUST be added
  * here, and the version marker MUST be bumped on both sides simultaneously.
- * Signatures produced under {@code v1} will still validate against the v1
- * canonicalizer; a mixed-version receipt simply won't verify.
+ * A receipt signed under another version does not verify.
  */
 public final class ReceiptCanonicalizer {
 

@@ -12,7 +12,7 @@ package eu.gillstrom.hsm.service;
  *
  * <ul>
  *   <li>{@link FailClosedSignatoryRightsVerifier} — the default. Returns
- *       {@link Result#unauthorised(String)} for every query and emits a
+ *       {@link Result#unknown(String)} for every query and emits a
  *       {@code WARN} log. Intended for deployments that have not yet wired
  *       up a real registry, so the gap is loud rather than silent.</li>
  *   <li>{@link MockAgreementRegistrySignatoryRightsVerifier} — loads

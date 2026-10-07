@@ -27,7 +27,7 @@ import java.nio.charset.StandardCharsets;
  *
  * <p>Spring Boot bounds headers ({@code server.max-http-request-header-size}),
  * multipart and form-encoded bodies, but not a JSON body, which is every
- * request railgate accepts. The same filter as gatekeeper's: a declared
+ * request hsm accepts. The same filter as gatekeeper's: a declared
  * {@code Content-Length} above the cap is answered with 413 before a body
  * byte is read; a chunked body is counted while it is read and the read
  * fails once the cap is passed (the status is then whatever the container

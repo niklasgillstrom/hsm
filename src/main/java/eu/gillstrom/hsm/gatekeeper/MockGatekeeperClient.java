@@ -48,11 +48,13 @@ import java.util.UUID;
  * does NOT re-run HSM-attestation verification. Its purpose is solely to
  * demonstrate the receipt format and the verify→issue→confirm plumbing.
  *
- * <p>The mock confirm step always returns
- * {@code RegistryStatus.VERIFIED_AND_ISSUED} when the public-key match is
- * computed against the issued certificate (or
- * {@code REJECTED_NOT_ISSUED} when {@code issued=false}). It does NOT
- * implement the anomaly states — those are gatekeeper-side concerns.
+ * <p>The mock confirm step returns {@code VERIFIED_AND_ISSUED} when the
+ * issued certificate's public key matches the verified one,
+ * {@code ANOMALY_PUBLIC_KEY_MISMATCH} when it does not,
+ * {@code VERIFIED_NOT_ISSUED} when {@code issued=false}, and
+ * {@code ANOMALY_UNKNOWN_VERIFICATION} for an unknown verification; a wrong
+ * or already spent nonce is a {@link GatekeeperException}. Other anomaly
+ * states are gatekeeper-side concerns.
  */
 @Component
 @ConditionalOnProperty(name = "swish.gatekeeper.mode", havingValue = "mock")

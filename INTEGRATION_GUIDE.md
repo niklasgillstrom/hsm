@@ -17,14 +17,14 @@ The audience is a **systems / integration engineer** at the FE who has been aske
 | `verification/SecurosysVerifier`, `verification/YubicoVerifier` | Vendor-specific HSM attestation verifiers; pin real vendor roots; PKIX-validated chain + signature + non-extractability check | Yes |
 | `verification/AzureHsmVerifier`, `verification/GoogleCloudHsmVerifier`, `verification/MarvellAttestation`, `verification/MarvellHsmVerifier` | Marvell-based verifiers (Azure, Google, physical Marvell); Marvell roots from Microsoft's validator, Google owner root | **No**: never valid until a real Azure / Google / Marvell attestation confirms the Marvell format (`MARVELL_FORMAT_UNCONFIRMED`) |
 | `gatekeeper/GatekeeperClient` (interface) + `HttpGatekeeperClient` | The FE → NCA verify/confirm RPC, two-step protocol | Yes — `mode=http` against the NCA's published gatekeeper URL |
-| `gatekeeper/ReceiptVerifier`, `gatekeeper/ReceiptCanonicalizer` | Validates the gatekeeper-signed receipt against the canonical bytes the FE submitted | Yes |
+| `gatekeeper/ReceiptVerifier`, `gatekeeper/ReceiptCanonicalizer` | Validates the gatekeeper's signature over the canonical form of the receipt, under a trusted gatekeeper key | Yes |
 | `gatekeeper/GatekeeperKeyRegistry` | Trusted set of gatekeeper signing certificates | Yes — populate via `swish.gatekeeper.trusted-keys` |
 | `service/AttestationService`, `controller/AttestationController` | End-to-end FE-side endpoint that takes CSR + attestation + BankID-signed mandate from a TL, runs the four-phase pipeline, returns issued cert | Reference flow only — adapt the wiring into the FE's own controller layer |
 | `issuance/IssuanceClient` (interface) + `MockIssuanceClient` | Mock CA that signs the CSR locally for the reference flow | **No** — replace with the FE's real CA integration |
-| `service/SignatoryRightsVerifier` (interface) + `FailClosedSignatoryRightsVerifier` + `MockAgreementRegistrySignatoryRightsVerifier` | Validates that the BankID-signed mandate authorises the requesting TL | **No** for production — write a custom adapter against the FE's actual signatory-rights database |
+| `service/SignatoryRightsVerifier` (interface) + `FailClosedSignatoryRightsVerifier` + `MockAgreementRegistrySignatoryRightsVerifier` | Checks that the person who signed with BankID is an authorised signatory for the organisation and Swish number | **No** for production — write a custom adapter against the FE's actual signatory-rights database |
 | `service/BankIdService` | BankID signature verification (operational precondition for issuance) | Reference structure — adapt to the FE's actual BankID provider integration |
 
-The eight vendor verifiers, the gatekeeper-client + receipt-validation layer, and the verification-pipeline orchestration in `AttestationService` are usable directly. The CA, signatory-rights and BankID integrations are FE-specific and require adapter work.
+The nine vendor verifiers, the gatekeeper-client + receipt-validation layer, and the verification-pipeline orchestration in `AttestationService` are usable directly. The CA, signatory-rights and BankID integrations are FE-specific and require adapter work.
 
 ---
 
@@ -58,6 +58,7 @@ Phase 4 — gatekeeper.confirm
 In an FE that has an existing CSR-issuance pipeline, the integration points are:
 
 - **Before** the FE's CA signs anything: insert Phase 1 (local verification) + Phase 2 (`gatekeeper.verify`). If either fails, abort issuance with a 4xx to the TL — the FE has not satisfied its Article 6(10) duty and a sanction-bearing breach would result if it proceeded.
+  The reference `AttestationController` answers 200 for every stage and reports the outcome in the body (`stage`, `errors`); the status codes in this guide are for the FE's own pipeline, which maps the stages to them.
 - **After** the FE's CA returns a signed cert but before the cert is delivered to the TL: insert Phase 4 (`gatekeeper.confirm`). If `confirm` fails (e.g., gatekeeper rejects on public-key mismatch or registry anomaly), the FE must NOT deliver the cert; revoke it immediately.
 
 The reference flow in `AttestationService.verifyAndIssue(...)` shows the orchestration in one place. The FE's production code can follow the same sequence or split it across services, as long as the four phases happen in order and the second/fourth complete before any production-trust signal (cert delivery to TL, registration in payment infrastructure, etc.) is emitted.

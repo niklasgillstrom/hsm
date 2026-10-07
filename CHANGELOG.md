@@ -222,8 +222,9 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   MIT-licensed parser and validator (`Azure/azure-managed-hsm-key-attestation`:
   firmware 2.x and 3.x layouts, attribute numbers, signature schemes, Marvell
   roots) and Google's `verify_attestation_chains.py` (gzip, SHA-256 PKCS#1
-  v1.5, owner chain under Hawksbill Root v1 prod). The key is bound only
-  through the RSA modulus inside the signed blob; EXTRACTABLE must be false
+  v1.5, owner chain under Hawksbill Root v1 prod). The key is bound
+  through the RSA modulus inside the signed blob (the EKCV binding was
+  added later in 1.6.0, see below); EXTRACTABLE must be false
   and NEVER_EXTRACTABLE and LOCAL true. Azure reads the real `az` JSON;
   Google also checks the owner chain and accepts gzip input.
 - **Marvell roots updated.** The 2015 Marvell root expired 2025-11-16; the

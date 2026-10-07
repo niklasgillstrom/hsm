@@ -337,9 +337,10 @@ public class AttestationService {
     /**
      * Build the gatekeeper verify request from the customer-facing
      * {@link CertificateRequest}. The wire format submits the attested
-     * <em>public key</em> rather than the CSR — surrounding KYC metadata
-     * (BankID, organisation/Swish numbers, subject DN) is intentionally
-     * excluded; it is not part of the gatekeeper's mandate.
+     * <em>public key</em> rather than the CSR. The organisation number goes
+     * as {@code supplierIdentifier} and the BankID relying party's name as
+     * {@code supplierName}; the BankID material, the Swish number and the
+     * subject DN are not sent.
      */
     /** How old, or how far ahead, a gatekeeper receipt may be when it arrives. */
     static final java.time.Duration RECEIPT_MAX_SKEW = java.time.Duration.ofMinutes(5);
@@ -942,8 +943,8 @@ public class AttestationService {
         try {
             return HsmVendor.valueOf(specified.toUpperCase());
         } catch (IllegalArgumentException e) {
-            // Unknown vendor token — callers handle a null return by falling
-            // through to auto-detection or rejecting the request; no stack
+            // Unknown vendor token — the caller rejects the request ("hsmVendor
+            // is required for signing certificates"); no stack
             // trace is useful here, but a structured debug log helps operators
             // see what token clients are sending.
             log.debug("detectVendor: unknown HSM vendor token '{}'", specified);

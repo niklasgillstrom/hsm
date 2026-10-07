@@ -373,8 +373,8 @@ public class BankIdService {
      *       than merely attached to a legitimate certificate chain by an
      *       attacker.</li>
      *   <li>Parse the certificate chain and validate it cryptographically via
-     *       {@link CertPathValidator} against the user certificate's own root,
-     *       using the standard PKIX algorithm. Revocation checking is disabled
+     *       {@link CertPathValidator} against the pinned BankID roots (never a
+     *       root the caller supplied), using the standard PKIX algorithm. Revocation checking is disabled
      *       here (consistent with the chosen validation model); higher layers
      *       should rely on the OCSP response cross-check (step&nbsp;4) for
      *       certificate-status information.</li>
@@ -637,12 +637,10 @@ public class BankIdService {
     /**
      * Validate the BankID certificate chain using the standard PKIX algorithm.
      *
-     * <p>The root certificate in the chain is treated as the trust anchor; this
-     * means the chain is validated for internal consistency (signatures,
-     * validity periods, BasicConstraints, path length, key usage) but the root
-     * itself must be separately trusted by the caller. In practice BankID chains
-     * should terminate in "Finansiell ID-Teknik BID AB" or equivalent — the
-     * caller may want to pin that root explicitly.</p>
+     * <p>The trust anchors are the pinned BankID roots (the test root only with
+     * {@code swish.bankid.allow-test-root}); a root certificate in the
+     * submitted chain is never used as an anchor. PKIX checks signatures,
+     * validity periods, BasicConstraints, path length and key usage.</p>
      *
      * <p>Returns the validated path as well as the verdict: the OCSP step needs
      * the CA certificate that issued the user certificate in order to verify the
