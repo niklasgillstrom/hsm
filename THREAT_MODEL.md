@@ -160,7 +160,7 @@
 ### Residual risks
 
 - **Request size** *(closed in 1.6.0)*. This section said callers inherit "reasonable" Spring Boot body limits of about 2 MB. Spring Boot bounds form-encoded and multipart bodies only, not JSON, so a request of any size was read in full (a 30 MB body was accepted). `RequestSizeLimitFilter` now bounds it.
-- **No caller authentication.** `AttestationController` has no authentication of its own. The authority to have a certificate issued comes from the signed BankID payload (an allowed relying party, an authorised signatory, the request binding) and the attestation, not from the caller's identity, so an unauthenticated caller can only submit requests that someone authorised. It can still make the service spend work and gatekeeper calls on requests that fail; a deployment exposes the API behind its own authentication or gateway.
+- **Caller authentication is the deployment's TLS layer.** In Swish the certificate API is called with a transport certificate, mTLS with the company's Swish number (123…) or the technical supplier's number (987…). This reference implementation does not configure that: `AttestationController` has no authentication of its own and does not compare the caller's certificate with the request. The authority to have a certificate issued is checked independently of the caller, in the signed BankID payload (an allowed relying party, an authorised signatory, the request binding) and the attestation.
 - **No rate limiting.** The library provides no throttling. A deployer fronting this with a rate-limiter filter closes the gap. The sibling gatekeeper repo acknowledges the same.
 
 ---
