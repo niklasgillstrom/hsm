@@ -58,6 +58,22 @@ public final class TestPki {
         return new JcaX509CertificateConverter().getCertificate(b.build(cs));
     }
 
+    /** A self-signed certificate with the given subject, e.g. a Swish transport certificate's. */
+    public static X509Certificate withSubject(X500Name subject) throws Exception {
+        KeyPair kp = newRsaKeyPair(2048);
+        long now = System.currentTimeMillis();
+        X509v3CertificateBuilder b = new JcaX509v3CertificateBuilder(
+                subject, nextSerial(), new Date(now - 60_000L), new Date(now + 3600_000L),
+                subject, kp.getPublic());
+        ContentSigner cs = new JcaContentSignerBuilder("SHA256withRSA").build(kp.getPrivate());
+        return new JcaX509CertificateConverter().getCertificate(b.build(cs));
+    }
+
+    /** A self-signed certificate with the given subject DN string. */
+    public static X509Certificate withSubject(String subject) throws Exception {
+        return withSubject(new X500Name(subject));
+    }
+
     /** Issue a subordinate CA certificate under the given issuer. */
     public static X509Certificate subordinateCa(
             KeyPair subjectKp, String subjectCn,

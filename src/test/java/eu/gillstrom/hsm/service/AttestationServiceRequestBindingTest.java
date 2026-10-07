@@ -70,7 +70,7 @@ class AttestationServiceRequestBindingTest {
                 new eu.gillstrom.hsm.verification.FortanixVerifier(),
                 new eu.gillstrom.hsm.verification.NShieldVerifier(),
                 (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"),
-                null, null, null, TEST_KEY_POLICY, TEST_CONSENT_POLICY, "SE");
+                null, null, null, TEST_KEY_POLICY, TEST_CONSENT_POLICY, CallerPolicy.off(), "SE");
     }
 
     @Test

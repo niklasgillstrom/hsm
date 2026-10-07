@@ -36,6 +36,7 @@ import eu.gillstrom.hsm.verification.YubicoVerifier;
 
 import java.io.StringWriter;
 import java.security.PublicKey;
+import java.security.cert.X509Certificate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -75,6 +76,7 @@ public class AttestationService {
     private final IssuanceClient issuanceClient;
     private final KeyPolicy keyPolicy;
     private final BankIdConsentPolicy consentPolicy;
+    private final CallerPolicy callerPolicy;
     private final String gatekeeperCountryCode;
 
     public AttestationService(BankIdService bankIdService,
@@ -93,6 +95,7 @@ public class AttestationService {
             IssuanceClient issuanceClient,
             KeyPolicy keyPolicy,
             BankIdConsentPolicy consentPolicy,
+            CallerPolicy callerPolicy,
             @Value("${swish.gatekeeper.country-code:SE}") String gatekeeperCountryCode) {
         this.bankIdService = bankIdService;
         this.securosysVerifier = securosysVerifier;
@@ -110,6 +113,7 @@ public class AttestationService {
         this.issuanceClient = issuanceClient;
         this.keyPolicy = keyPolicy;
         this.consentPolicy = consentPolicy;
+        this.callerPolicy = callerPolicy;
         this.gatekeeperCountryCode = gatekeeperCountryCode;
     }
 
@@ -142,8 +146,16 @@ public class AttestationService {
      * proceeds directly.
      */
     public IssuanceResponse verifyAndIssue(CertificateRequest request) {
+        return verifyAndIssue(request, null);
+    }
+
+    /**
+     * @param caller the transport certificate the request was made with (mTLS),
+     *               or null; checked by {@link CallerPolicy}
+     */
+    public IssuanceResponse verifyAndIssue(CertificateRequest request, X509Certificate caller) {
         // Phase 1: local verification.
-        VerificationResponse local = verify(request);
+        VerificationResponse local = verify(request, caller);
         if (!local.isValid()) {
             return IssuanceResponse.rejectedLocal(local);
         }
@@ -462,7 +474,16 @@ public class AttestationService {
         return w.toString();
     }
 
+    /** As {@link #verify(CertificateRequest, X509Certificate)} for a request made without a transport certificate. */
     public VerificationResponse verify(CertificateRequest request) {
+        return verify(request, null);
+    }
+
+    /**
+     * @param caller the transport certificate the request was made with (mTLS),
+     *               or null; checked by {@link CallerPolicy}
+     */
+    public VerificationResponse verify(CertificateRequest request, X509Certificate caller) {
         List<String> errors = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
 
@@ -557,6 +578,12 @@ public class AttestationService {
                     bankIdResult.getUsrVisibleData(), request.getOrganisationNumber(),
                     request.getSwishNumber()));
         }
+
+        // Who called: the transport certificate of the TLS connection must be
+        // the company's own (123) or that of the technical supplier that is the
+        // BankID relying party (987).
+        errors.addAll(callerPolicy.violations(caller, request.getOrganisationNumber(),
+                request.getSwishNumber(), bankIdResult.getRelyingPartyOrgNumber()));
 
         SignatoryRightsVerifier.Result signatoryResult = signatoryRightsVerifier.check(
                 bankIdResult.getPersonalNumber(),

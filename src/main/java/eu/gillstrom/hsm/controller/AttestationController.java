@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -12,6 +13,8 @@ import eu.gillstrom.hsm.model.CertificateRequest;
 import eu.gillstrom.hsm.model.IssuanceResponse;
 import eu.gillstrom.hsm.model.VerificationResponse;
 import eu.gillstrom.hsm.service.AttestationService;
+
+import java.security.cert.X509Certificate;
 
 @RestController
 @RequestMapping("/api/v1/attestation")
@@ -34,8 +37,9 @@ public class AttestationController {
             @ApiResponse(responseCode = "400", description = "Invalid request")
         }
     )
-    public ResponseEntity<VerificationResponse> verify(@Valid @RequestBody CertificateRequest request) {
-        VerificationResponse response = attestationService.verify(request);
+    public ResponseEntity<VerificationResponse> verify(@Valid @RequestBody CertificateRequest request,
+            HttpServletRequest httpRequest) {
+        VerificationResponse response = attestationService.verify(request, caller(httpRequest));
         return ResponseEntity.ok(response);
     }
 
@@ -60,9 +64,19 @@ public class AttestationController {
             @ApiResponse(responseCode = "400", description = "Invalid request")
         }
     )
-    public ResponseEntity<IssuanceResponse> verifyAndIssue(@Valid @RequestBody CertificateRequest request) {
-        IssuanceResponse response = attestationService.verifyAndIssue(request);
+    public ResponseEntity<IssuanceResponse> verifyAndIssue(@Valid @RequestBody CertificateRequest request,
+            HttpServletRequest httpRequest) {
+        IssuanceResponse response = attestationService.verifyAndIssue(request, caller(httpRequest));
         return ResponseEntity.ok(response);
+    }
+
+    /** The client certificate the TLS handshake established (mTLS), or null. */
+    static X509Certificate caller(HttpServletRequest httpRequest) {
+        Object chain = httpRequest.getAttribute("jakarta.servlet.request.X509Certificate");
+        if (chain instanceof X509Certificate[] certs && certs.length > 0) {
+            return certs[0];
+        }
+        return null;
     }
 
     @GetMapping("/health")

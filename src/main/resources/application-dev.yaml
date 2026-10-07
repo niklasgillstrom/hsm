@@ -1,8 +1,9 @@
 ## Developer profile — activate with: --spring.profiles.active=dev
 ##
-## This profile turns the OpenAPI document and Swagger UI back on and trusts
-## the Test BankID root (swish.bankid.allow-test-root). Every other profile
-## leaves both off (see application.yaml).
+## This profile turns the OpenAPI document and Swagger UI back on, trusts
+## the Test BankID root (swish.bankid.allow-test-root) and switches off the
+## transport-certificate binding (swish.caller-binding). Every other profile
+## leaves these as application.yaml has them.
 ## Do not deploy with this profile active.
 
 springdoc:
@@ -14,3 +15,6 @@ springdoc:
 swish:
   bankid:
     allow-test-root: true
+  # A local run without mTLS has no transport certificate to compare with the
+  # request (CallerPolicy).
+  caller-binding: "off"

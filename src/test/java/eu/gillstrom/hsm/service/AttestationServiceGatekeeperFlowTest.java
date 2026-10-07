@@ -260,6 +260,7 @@ class AttestationServiceGatekeeperFlowTest {
                 issuance,
                 KeyPolicy.defaults(),
                 TEST_CONSENT_POLICY,
+                CallerPolicy.off(),
                 countryCode);
     }
 

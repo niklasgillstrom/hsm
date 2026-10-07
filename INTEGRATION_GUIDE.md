@@ -111,6 +111,7 @@ Replace `MockIssuanceClient` with an `IssuanceClient` implementation that takes 
 | `SWISH_GATEKEEPER_TIMEOUT_MS` | RPC timeout | `5000` (or higher for cross-border traffic) |
 | `SWISH_GATEKEEPER_TRUSTED_KEYS` | Newline- or comma-separated PEMs of NCA gatekeeper signing certs that this FE accepts | The NCA's published certificate from `GET /v1/gatekeeper/keys` |
 | `SWISH_SIGNATORY_RIGHTS_MODE` | Signatory-rights adapter | The FE's custom adapter name; **must not stay at `fail-closed`** in production |
+| `SWISH_CALLER_BINDING` | Bind the caller's transport certificate to the request (`CallerPolicy`) | `required` (the default), with `SERVER_SSL_CLIENT_AUTH=need` and the Swish CA in `server.ssl.trust-store` |
 | `SWISH_ISSUANCE_MODE` | CA backend | The FE's custom integration; **must not stay at `mock`** in production |
 
 The mTLS client certificate the FE presents to the gatekeeper, and the trust store for the gatekeeper's certificate, come from a Spring Boot SSL bundle named by `swish.gatekeeper.ssl-bundle` (`spring.ssl.bundle.jks.<name>.keystore.*` / `.truststore.*`, or the `pem` equivalents). When the property is empty the JVM defaults apply (`-Djavax.net.ssl.keyStore=...`). `swish.gatekeeper.url` must be `https://`. If the gatekeeper signs receipts with anything other than SHA256withRSA, set `swish.gatekeeper.signature-algorithm` to the same algorithm.
@@ -184,6 +185,7 @@ Before the FE's first production traffic:
 - [ ] `swish.gatekeeper.mode=http` and `swish.gatekeeper.url` points at the NCA's gatekeeper deployment
 - [ ] `swish.gatekeeper.trusted-keys` is populated from the NCA's `GET /v1/gatekeeper/keys` and a refresh job is scheduled (weekly or per NCA policy)
 - [ ] mTLS client certificate is provisioned and presented by the FE's HTTP client to the gatekeeper
+- [ ] The API listens with mTLS (`server.ssl.client-auth=need`, Swish CA in the trust store) and `swish.caller-binding` is `required`
 - [ ] `swish.signatory-rights.mode` is set to the FE's custom adapter (NOT `fail-closed`, NOT `mock-registry`)
 - [ ] `swish.issuance.mode` is set to the FE's custom CA integration (NOT `mock`)
 - [ ] BankID integration is connected to the FE's contracted BankID provider

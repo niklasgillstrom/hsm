@@ -8,6 +8,25 @@ Versions before 1.4.0 have no entry here; their history is recorded in
 
 ### Security
 
+- **The caller's transport certificate is bound to the request.** The API is
+  called with mTLS, with the company's transport certificate (its Swish
+  number, 123…) or the technical supplier's (987…). Until now the service did
+  not look at that certificate, so any holder of a valid transport
+  certificate could submit a request for another company. `CallerPolicy` now
+  requires a 123 certificate's CN to be the request's Swish number and its O
+  the request's organisation number, and a 987 certificate's O to be the
+  BankID relying party; anything else, or no certificate, is refused
+  (`CALLER_NOT_BOUND`, `CALLER_CERTIFICATE_MISSING`). On by default
+  (`swish.caller-binding=required`); the `dev` profile sets `off`. The
+  certificate's chain and validity remain the TLS layer's job
+  (`server.ssl.client-auth=need`, Swish CA in the trust store).
+  Tests: `CallerPolicyTest` (12), `AttestationServiceTransportTest.callerBinding`,
+  `AttestationControllerCallerTest` (2) and `CallerCertificateWiringTest`,
+  which makes real mTLS calls. Each fails when the certificate is not passed
+  from the TLS layer to the service or not checked there (mutants: controller
+  passes null, service skips the check, `verifyAndIssue` drops the caller,
+  controller takes the last certificate of the chain instead of the leaf).
+
 - **Build:** Jackson 3.1.7 and 2.21.7 instead of the 3.1.5 and 2.21.5 that
   Spring Boot 4.1.1 manages (CVE-2026-83557, listed as fixed in 3.1.6 and
   2.21.6); `project.build.outputTimestamp`, so the same commit builds to a

@@ -16,6 +16,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.security.KeyPair;
+import java.security.cert.X509Certificate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -116,7 +117,7 @@ class AttestationServiceTransportTest {
                 new eu.gillstrom.hsm.verification.FortanixVerifier(),
                 new eu.gillstrom.hsm.verification.NShieldVerifier(),
                 (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"),
-                null, null, issuance, KeyPolicy.defaults(), TEST_CONSENT_POLICY, "SE");
+                null, null, issuance, KeyPolicy.defaults(), TEST_CONSENT_POLICY, CallerPolicy.off(), "SE");
 
         IssuanceResponse r = service.verifyAndIssue(boundTransportRequest());
 
@@ -148,7 +149,7 @@ class AttestationServiceTransportTest {
                 new eu.gillstrom.hsm.verification.FortanixVerifier(),
                 new eu.gillstrom.hsm.verification.NShieldVerifier(),
                 (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"),
-                null, null, issuance, TEST_KEY_POLICY, new BankIdConsentPolicy("5569641234"), "SE");
+                null, null, issuance, TEST_KEY_POLICY, new BankIdConsentPolicy("5569641234"), CallerPolicy.off(), "SE");
 
         VerificationResponse r = service.verify(boundTransportRequest());
 
@@ -156,9 +157,37 @@ class AttestationServiceTransportTest {
         assertThat(r.getErrors()).anyMatch(e -> e.startsWith("BANKID_RELYING_PARTY_NOT_ALLOWED"));
     }
 
+    @Test
+    @DisplayName("With caller binding, only the company's own or the relying party's certificate may call")
+    void callerBinding() throws Exception {
+        AttestationService service = service(
+                (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"), new CallerPolicy("required"));
+        X509Certificate own = TestPki.withSubject("C=SE, O=5569743098, CN=1231015932");
+        X509Certificate supplier = TestPki.withSubject("C=SE, O=5566778899, CN=9871234567");
+        X509Certificate otherCompany = TestPki.withSubject("C=SE, O=5561234567, CN=1239999999");
+        X509Certificate otherSupplier = TestPki.withSubject("C=SE, O=5561112223, CN=9871234567");
+
+        assertThat(service.verifyAndIssue(boundTransportRequest(), own).isIssued()).isTrue();
+        assertThat(service.verifyAndIssue(boundTransportRequest(), supplier).isIssued()).isTrue();
+
+        IssuanceResponse missing = service.verifyAndIssue(boundTransportRequest());
+        assertThat(missing.isIssued()).isFalse();
+        assertThat(missing.getErrors()).anyMatch(e -> e.startsWith("CALLER_CERTIFICATE_MISSING"));
+        for (X509Certificate wrong : new X509Certificate[] {otherCompany, otherSupplier}) {
+            IssuanceResponse r = service.verifyAndIssue(boundTransportRequest(), wrong);
+            assertThat(r.isIssued()).isFalse();
+            assertThat(r.getStage()).isEqualTo(IssuanceResponse.Stage.REJECTED_LOCAL_VERIFICATION);
+            assertThat(r.getErrors()).anyMatch(e -> e.startsWith("CALLER_NOT_BOUND"));
+        }
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private AttestationService service(SignatoryRightsVerifier signatoryRights) {
+        return service(signatoryRights, CallerPolicy.off());
+    }
+
+    private AttestationService service(SignatoryRightsVerifier signatoryRights, CallerPolicy callerPolicy) {
         return new AttestationService(
                 new BankIdService(fx.anchors()),
                 new SecurosysVerifier(),
@@ -171,7 +200,7 @@ class AttestationServiceTransportTest {
                 new eu.gillstrom.hsm.verification.FortanixVerifier(),
                 new eu.gillstrom.hsm.verification.NShieldVerifier(),
                 signatoryRights,
-                null, null, issuance, TEST_KEY_POLICY, TEST_CONSENT_POLICY, "SE");
+                null, null, issuance, TEST_KEY_POLICY, TEST_CONSENT_POLICY, callerPolicy, "SE");
     }
 
     private CertificateRequest boundTransportRequest() throws Exception {
