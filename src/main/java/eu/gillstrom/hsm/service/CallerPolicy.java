@@ -20,9 +20,9 @@ import java.util.Locale;
  *
  * <p>In Swish the certificate API is called with mTLS, using either the
  * company's transport certificate (its Swish number, 123…) or the technical
- * supplier's (its number, 987…). The certificate's subject carries the number
- * in CN and the organisation number in O, as in the reference requests in
- * {@code examples/} ({@code C=SE, O=5569743098, CN=1231015932}).</p>
+ * supplier's (its number, 987…). Both carry the number in CN and the
+ * organisation number in O, as in the reference requests in {@code examples/}
+ * ({@code C=SE, O=5569743098, CN=1231015932}).</p>
  *
  * <ul>
  *   <li>A 123 certificate may only request certificates for itself: CN must be
