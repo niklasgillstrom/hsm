@@ -56,4 +56,30 @@ class BankIdServiceTest {
         assertThat(result.isValid()).isFalse();
         assertThat(result.getError()).isNotBlank();
     }
+
+    /**
+     * The parser refuses any DOCTYPE, so neither an external entity (XXE,
+     * here pointing at a local file) nor an entity-expansion bomb is ever
+     * resolved. The error names the DOCTYPE: the refusal comes from the
+     * parser, not from a later failure of the signature check.
+     */
+    @Test
+    void aDoctypeIsRefusedByTheParser() {
+        BankIdService service = new BankIdService(false);
+        String[] documents = {
+            "<?xml version=\"1.0\"?><!DOCTYPE d [<!ENTITY x SYSTEM \"file:///etc/hostname\">]>"
+                + "<bankIdSignedData><usrVisibleData>&x;</usrVisibleData></bankIdSignedData>",
+            "<?xml version=\"1.0\"?><!DOCTYPE d [<!ENTITY a \"aaaaaaaaaa\">"
+                + "<!ENTITY b \"&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;\"><!ENTITY c \"&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;\">]>"
+                + "<bankIdSignedData><usrVisibleData>&c;</usrVisibleData></bankIdSignedData>",
+            "<?xml version=\"1.0\"?><!DOCTYPE d SYSTEM \"http://127.0.0.1:9/external.dtd\">"
+                + "<bankIdSignedData/>"};
+        for (String xml : documents) {
+            BankIdService.BankIdResult result = service.verify(
+                    Base64.getEncoder().encodeToString(xml.getBytes(StandardCharsets.UTF_8)), null);
+
+            assertThat(result.isValid()).as(xml).isFalse();
+            assertThat(result.getError()).as(xml).startsWith("Parse error").contains("DOCTYPE");
+        }
+    }
 }

@@ -137,7 +137,7 @@ The FE's own audit record must cover what the gatekeeper's audit log does **not*
 
 Periodic data triangulation by the supervisor (described in the gatekeeper repo's `SUPERVISORY_OPERATIONS.md` §3.5) cross-references the FE's issuance record (this repository's audit data, not the gatekeeper's) with the gatekeeper's audit log and the issuing CA's CRL/OCSP. An issued cert without a matching `verificationId`+receipt in the FE's own record is a self-flagged Article 6(10) breach.
 
-The FE retains these records under the FE's own retention infrastructure — separate from the gatekeeper's. There is no shared-storage assumption.
+The FE retains these records under the FE's own retention infrastructure — separate from the gatekeeper's. There is no shared-storage assumption. From gatekeeper 1.6.0 the gatekeeper also keeps the submitted verification request, attestation evidence included, so the supervisor no longer depends on the FE's copy; the FE's own obligation is unchanged.
 
 ---
 

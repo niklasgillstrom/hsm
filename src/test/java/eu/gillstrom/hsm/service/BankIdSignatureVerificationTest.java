@@ -228,6 +228,7 @@ class BankIdSignatureVerificationTest {
         BankIdService.BankIdResult r = service.verify(sig, fx.ocspResponseBase64(sig));
 
         assertThat(r.isValid()).isFalse();
+        assertThat(r.getError()).isEqualTo("Missing or ambiguous bankIdSignedData element");
     }
 
     @Test
