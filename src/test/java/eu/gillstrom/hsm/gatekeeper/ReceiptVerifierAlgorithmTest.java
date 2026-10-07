@@ -101,4 +101,58 @@ class ReceiptVerifierAlgorithmTest {
         assertThatThrownBy(() -> new ReceiptVerifier(new GatekeeperKeyRegistry(""), "SHA1withRSA"))
                 .isInstanceOf(IllegalStateException.class);
     }
+
+    /** The 1.5.0 golden literal, for a receipt without the 1.6.0 party fields. */
+    private static final String V2_GOLDEN = "v2|VID-1|n|true|2026-10-06T12:00:00Z|ab|||||||||"
+            + "|||||||||";
+
+    private static VerifyResponse v2Signed(KeyPair kp, X509Certificate cert) throws Exception {
+        VerifyResponse r = VerifyResponse.builder()
+                .verificationId("VID-1")
+                .confirmationNonce("n")
+                .compliant(true)
+                .verificationTimestamp(Instant.parse("2026-10-06T12:00:00Z"))
+                .publicKeyFingerprint("ab")
+                .signingCertificate(TestPki.toPem(cert))
+                .build();
+        byte[] v2 = ReceiptCanonicalizer.canonicalize(r, ReceiptCanonicalizer.PREVIOUS_VERSION);
+        Signature s = Signature.getInstance("SHA256withRSA");
+        s.initSign(kp.getPrivate());
+        s.update(v2);
+        r.setSignature(Base64.getEncoder().encodeToString(s.sign()));
+        return r;
+    }
+
+    @Test
+    void aReceiptSignedBefore160StaysVerifiable() throws Exception {
+        KeyPair kp = TestPki.newRsaKeyPair(2048);
+        X509Certificate cert = TestPki.selfSignedCa(kp, "RSA gatekeeper");
+        ReceiptVerifier verifier = new ReceiptVerifier(new GatekeeperKeyRegistry(TestPki.toPem(cert)));
+        VerifyResponse old = v2Signed(kp, cert);
+
+        assertThat(new String(ReceiptCanonicalizer.canonicalize(old, "v2"), java.nio.charset.StandardCharsets.UTF_8))
+                .as("the v2 form is the one 1.5.0 signed: no customer fields, no supplier number")
+                .isEqualTo(V2_GOLDEN);
+        assertThat(verifier.verify(old)).isTrue();
+    }
+
+    @Test
+    void partyFieldsCannotBeAddedToAReceiptSignedBefore160() throws Exception {
+        KeyPair kp = TestPki.newRsaKeyPair(2048);
+        X509Certificate cert = TestPki.selfSignedCa(kp, "RSA gatekeeper");
+        ReceiptVerifier verifier = new ReceiptVerifier(new GatekeeperKeyRegistry(TestPki.toPem(cert)));
+        for (java.util.function.Consumer<VerifyResponse> add : java.util.List.<java.util.function.Consumer<VerifyResponse>>of(
+                r -> r.setCustomerOrganisationNumber("5569743098"),
+                r -> r.setCustomerSwishNumber("1231015932"),
+                r -> r.setSupplierNumber("9871234567"))) {
+            VerifyResponse old = v2Signed(kp, cert);
+            add.accept(old);
+            assertThat(verifier.verify(old)).isFalse();
+        }
+        // A v3 receipt is not accepted as v2 either: its signature covers more.
+        VerifyResponse v3 = receipt(kp, cert, "SHA256withRSA");
+        assertThat(verifier.verify(v3)).isTrue();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> ReceiptCanonicalizer.canonicalize(v3, "v1"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

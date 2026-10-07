@@ -168,6 +168,9 @@ class AttestationServiceGatekeeperFlowTest {
         java.util.Map<String, java.util.function.Consumer<VerifyResponse>> cases = new java.util.LinkedHashMap<>();
         cases.put("countryCode", r -> r.setCountryCode("NO"));
         cases.put("supplierIdentifier", r -> r.setSupplierIdentifier("5560000000"));
+        cases.put("supplierNumber", r -> r.setSupplierNumber("9870000000"));
+        cases.put("customerOrganisationNumber", r -> r.setCustomerOrganisationNumber("5560000000"));
+        cases.put("customerSwishNumber", r -> r.setCustomerSwishNumber("1230000000"));
         cases.put("keyPurpose", r -> r.setKeyPurpose("Swish TRANSPORT"));
         cases.put("hsmVendor", r -> r.setHsmVendor("SECUROSYS"));
         cases.put("verificationTimestamp", r -> r.setVerificationTimestamp(java.time.Instant.now().minusSeconds(6 * 60)));
@@ -185,6 +188,58 @@ class AttestationServiceGatekeeperFlowTest {
             assertThat(r.isIssued()).as(c.getKey()).isFalse();
             assertThat(r.getErrors()).as(c.getKey()).singleElement().asString().startsWith("RECEIPT_MISMATCH");
         }
+    }
+
+    @Test
+    @EnabledIf("yubicoFixturePresent")
+    void theGatekeeperIsToldTheCustomerAndTheTechnicalSupplier() throws Exception {
+        java.security.cert.X509Certificate supplier =
+                eu.gillstrom.hsm.testsupport.TestPki.withSubject("C=SE, O=5566778899, CN=9871234567");
+
+        IssuanceResponse r = service("SE").verifyAndIssue(signingRequest(), supplier);
+
+        assertThat(r.getStage()).as("errors: %s", r.getErrors())
+                .isEqualTo(IssuanceResponse.Stage.VERIFIED_ISSUED_AND_CONFIRMED);
+        VerifyRequest sent = gatekeeper.lastVerify;
+        assertThat(sent.getCustomerOrganisationNumber()).isEqualTo(ORG);
+        assertThat(sent.getCustomerSwishNumber()).isEqualTo(SWISH);
+        assertThat(sent.getSupplierIdentifier()).isEqualTo("5566778899");
+        assertThat(sent.getSupplierNumber()).isEqualTo("9871234567");
+        // The supplier is the BankID relying party (the fixture's srvInfo), so its name is known.
+        assertThat(sent.getSupplierName()).isNotBlank().isEqualTo(r.getVerification().getBankIdRelyingPartyName());
+        assertThat(r.getVerifyReceipt().getSupplierNumber()).isEqualTo("9871234567");
+        assertThat(r.getVerifyReceipt().getCustomerSwishNumber()).isEqualTo(SWISH);
+    }
+
+    @Test
+    @EnabledIf("yubicoFixturePresent")
+    void aCustomerCallingItselfHasNoTechnicalSupplier() throws Exception {
+        java.security.cert.X509Certificate own =
+                eu.gillstrom.hsm.testsupport.TestPki.withSubject("C=SE, O=5569743098, CN=1231015932");
+
+        IssuanceResponse r = service("SE").verifyAndIssue(signingRequest(), own);
+
+        assertThat(r.isIssued()).as("errors: %s", r.getErrors()).isTrue();
+        VerifyRequest sent = gatekeeper.lastVerify;
+        assertThat(sent.getCustomerOrganisationNumber()).isEqualTo(ORG);
+        assertThat(sent.getCustomerSwishNumber()).isEqualTo(SWISH);
+        assertThat(sent.getSupplierIdentifier()).isNull();
+        assertThat(sent.getSupplierNumber()).isNull();
+        assertThat(sent.getSupplierName()).isNull();
+    }
+
+    @Test
+    @EnabledIf("yubicoFixturePresent")
+    void aSupplierThatIsNotTheRelyingPartyIsNotGivenItsName() throws Exception {
+        // Possible only with caller binding off, as in this service: the name
+        // belongs to the relying party, so it is not attached to another supplier.
+        java.security.cert.X509Certificate other =
+                eu.gillstrom.hsm.testsupport.TestPki.withSubject("C=SE, O=5561112223, CN=9871234567");
+
+        service("SE").verifyAndIssue(signingRequest(), other);
+
+        assertThat(gatekeeper.lastVerify.getSupplierIdentifier()).isEqualTo("5561112223");
+        assertThat(gatekeeper.lastVerify.getSupplierName()).isNull();
     }
 
     @Test

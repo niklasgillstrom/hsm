@@ -261,7 +261,7 @@ public class IssuanceResponse {
     @Builder
     public static class VerifyResponseSummary {
         private String verificationId;
-        /** Signed field (third in the v2 canonical form); needed to re-verify the receipt. */
+        /** Signed field (third in the canonical form); needed to re-verify the receipt. */
         private String confirmationNonce;
         private boolean compliant;
         private Instant verificationTimestamp;
@@ -270,7 +270,10 @@ public class IssuanceResponse {
         private String hsmVendor;
         private String hsmModel;
         private String hsmSerialNumber;
+        private String customerOrganisationNumber;
+        private String customerSwishNumber;
         private String supplierIdentifier;
+        private String supplierNumber;
         private String supplierName;
         private String keyPurpose;
         private String countryCode;
@@ -314,7 +317,10 @@ public class IssuanceResponse {
                     .hsmVendor(r.getHsmVendor())
                     .hsmModel(r.getHsmModel())
                     .hsmSerialNumber(r.getHsmSerialNumber())
+                    .customerOrganisationNumber(r.getCustomerOrganisationNumber())
+                    .customerSwishNumber(r.getCustomerSwishNumber())
                     .supplierIdentifier(r.getSupplierIdentifier())
+                    .supplierNumber(r.getSupplierNumber())
                     .supplierName(r.getSupplierName())
                     .keyPurpose(r.getKeyPurpose())
                     .countryCode(r.getCountryCode())
@@ -354,7 +360,10 @@ public class IssuanceResponse {
                     .hsmVendor(hsmVendor)
                     .hsmModel(hsmModel)
                     .hsmSerialNumber(hsmSerialNumber)
+                    .customerOrganisationNumber(customerOrganisationNumber)
+                    .customerSwishNumber(customerSwishNumber)
                     .supplierIdentifier(supplierIdentifier)
+                    .supplierNumber(supplierNumber)
                     .supplierName(supplierName)
                     .keyPurpose(keyPurpose)
                     .countryCode(countryCode)

@@ -180,7 +180,7 @@ public class AttestationService {
         }
 
         // Phase 2: gatekeeper verify.
-        VerifyRequest verifyRequest = buildVerifyRequest(request, local, gatekeeperCountryCode);
+        VerifyRequest verifyRequest = buildVerifyRequest(request, local, gatekeeperCountryCode, caller);
         VerifyResponse verifyReceipt;
         try {
             verifyReceipt = gatekeeperClient.verify(verifyRequest);
@@ -337,17 +337,17 @@ public class AttestationService {
     /**
      * Build the gatekeeper verify request from the customer-facing
      * {@link CertificateRequest}. The wire format submits the attested
-     * <em>public key</em> rather than the CSR. The organisation number goes
-     * as {@code supplierIdentifier} and the BankID relying party's name as
-     * {@code supplierName}; the BankID material, the Swish number and the
-     * subject DN are not sent.
+     * <em>public key</em> rather than the CSR, with the customer (organisation
+     * and Swish numbers) and, when a technical supplier called, the supplier
+     * (organisation number and 987 number from its transport certificate).
+     * The BankID material and the subject DN are not sent.
      */
     /** How old, or how far ahead, a gatekeeper receipt may be when it arrives. */
     static final java.time.Duration RECEIPT_MAX_SKEW = java.time.Duration.ofMinutes(5);
 
     /**
      * Null when the receipt was issued within {@link #RECEIPT_MAX_SKEW} of
-     * {@code now}, echoes the country, supplier, key purpose and HSM vendor
+     * {@code now}, echoes the country, customer, supplier, key purpose and HSM vendor
      * this request sent, and reports key properties consistent with
      * compliance; otherwise what does not match.
      */
@@ -362,8 +362,15 @@ public class AttestationService {
         if (!equalsIgnoreCase(receipt.getCountryCode(), sent.getCountryCode())) {
             return "countryCode " + receipt.getCountryCode() + " is not " + sent.getCountryCode();
         }
-        if (!java.util.Objects.equals(receipt.getSupplierIdentifier(), sent.getSupplierIdentifier())) {
-            return "supplierIdentifier " + receipt.getSupplierIdentifier() + " is not " + sent.getSupplierIdentifier();
+        String[][] parties = {
+            {"customerOrganisationNumber", receipt.getCustomerOrganisationNumber(), sent.getCustomerOrganisationNumber()},
+            {"customerSwishNumber", receipt.getCustomerSwishNumber(), sent.getCustomerSwishNumber()},
+            {"supplierIdentifier", receipt.getSupplierIdentifier(), sent.getSupplierIdentifier()},
+            {"supplierNumber", receipt.getSupplierNumber(), sent.getSupplierNumber()}};
+        for (String[] p : parties) {
+            if (!java.util.Objects.equals(p[1], p[2])) {
+                return p[0] + " " + p[1] + " is not " + p[2];
+            }
         }
         if (!java.util.Objects.equals(receipt.getKeyPurpose(), sent.getKeyPurpose())) {
             return "keyPurpose " + receipt.getKeyPurpose() + " is not " + sent.getKeyPurpose();
@@ -395,18 +402,30 @@ public class AttestationService {
     }
 
     private static VerifyRequest buildVerifyRequest(CertificateRequest request,
-            VerificationResponse local, String countryCode) {
+            VerificationResponse local, String countryCode, X509Certificate caller) {
         try {
             PublicKey pk = parseCsrPublicKey(request.getCsr());
             String publicKeyPem = toPublicKeyPem(pk);
+            // The technical supplier is whoever called with a 987 transport
+            // certificate (CallerPolicy has checked it is the BankID relying
+            // party). A customer that calls with its own 123 certificate has
+            // no technical supplier, and the supplier fields stay empty.
+            java.util.Optional<CallerPolicy.Supplier> supplier = CallerPolicy.supplierOf(caller);
+            String supplierName = supplier.isPresent() && local != null
+                    && CallerPolicy.sameOrganisationNumber(local.getBankIdRelyingPartyOrgNumber(),
+                            supplier.get().organisationNumber())
+                    ? local.getBankIdRelyingPartyName() : null;
             return VerifyRequest.builder()
                     .publicKey(publicKeyPem)
                     .hsmVendor(request.getHsmVendor())
                     .attestationData(request.getAttestationData())
                     .attestationSignature(request.getAttestationSignature())
                     .attestationCertChain(request.getAttestationCertChain())
-                    .supplierIdentifier(request.getOrganisationNumber())
-                    .supplierName(local == null ? null : local.getBankIdRelyingPartyName())
+                    .customerOrganisationNumber(request.getOrganisationNumber())
+                    .customerSwishNumber(request.getSwishNumber())
+                    .supplierIdentifier(supplier.map(CallerPolicy.Supplier::organisationNumber).orElse(null))
+                    .supplierNumber(supplier.map(CallerPolicy.Supplier::number).orElse(null))
+                    .supplierName(supplierName)
                     .keyPurpose(local == null ? null : ("Swish " + local.getCertificateType()))
                     .countryCode(countryCode)
                     .build();

@@ -109,4 +109,15 @@ class KeyPolicyTest {
         g.initialize(new ECGenParameterSpec(curve));
         return g.generateKeyPair();
     }
+
+    @org.junit.jupiter.api.Test
+    void weakCsrSignatureAlgorithmsCannotBeConfigured() {
+        for (String weak : new String[] {"SHA1withRSA", "sha1withecdsa", "MD5withRSA", "MD2withRSA",
+                "SHA256withRSA, SHA1withRSA"}) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> new KeyPolicy("RSA-4096", weak))
+                    .as(weak).isInstanceOf(IllegalStateException.class).hasMessageContaining("too weak");
+        }
+        org.assertj.core.api.Assertions.assertThatCode(() -> new KeyPolicy("RSA-4096", "SHA512withRSA"))
+                .doesNotThrowAnyException();
+    }
 }

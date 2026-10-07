@@ -74,7 +74,10 @@ public class VerifyResponse {
     private KeyProperties keyProperties;
     private DoraCompliance doraCompliance;
 
+    private String customerOrganisationNumber;
+    private String customerSwishNumber;
     private String supplierIdentifier;
+    private String supplierNumber;
     private String supplierName;
     private String keyPurpose;
     private String countryCode;

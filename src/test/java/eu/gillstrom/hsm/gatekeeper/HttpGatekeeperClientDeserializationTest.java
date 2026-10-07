@@ -37,7 +37,10 @@ class HttpGatekeeperClientDeserializationTest {
                 "article28_1a": true,
                 "summary": "test"
               },
-              "supplierIdentifier": "5569743098",
+              "customerOrganisationNumber": "5569743098",
+              "customerSwishNumber": "1231015932",
+              "supplierIdentifier": "5566778899",
+              "supplierNumber": "9871234567",
               "supplierName": "Test",
               "keyPurpose": "signing",
               "countryCode": "SE",
@@ -73,8 +76,8 @@ class HttpGatekeeperClientDeserializationTest {
             """;
 
     private static final String EXPECTED_GOLDEN =
-            "v2|test-uuid|test-nonce|true|2026-04-27T00:00:00Z|aa:bb|RSA|YUBICO|YubiHSM 2|"
-            + "20783176|5569743098|Test|signing|SE|"
+            "v3|test-uuid|test-nonce|true|2026-04-27T00:00:00Z|aa:bb|RSA|YUBICO|YubiHSM 2|"
+            + "20783176|5569743098|1231015932|5566778899|9871234567|Test|signing|SE|"
             + "true|true|true|true|"
             + "true|true|true|true|true|true";
 

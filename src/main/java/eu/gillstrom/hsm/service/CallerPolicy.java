@@ -100,6 +100,35 @@ public class CallerPolicy {
         return out;
     }
 
+    /** A technical supplier as its transport certificate names it. */
+    public record Supplier(String number, String organisationNumber) {
+    }
+
+    /**
+     * The technical supplier that made the call: the 987 number (CN) and the
+     * organisation number (O) of a 987 transport certificate. Empty for a
+     * company's own 123 certificate, for no certificate and for a subject
+     * without exactly one CN and O. Identity only: whether the certificate
+     * may make the request is {@link #violations}.
+     */
+    public static java.util.Optional<Supplier> supplierOf(X509Certificate caller) {
+        if (caller == null) {
+            return java.util.Optional.empty();
+        }
+        String number = single(caller, BCStyle.CN);
+        String org = digits(single(caller, BCStyle.O));
+        if (number == null || !number.startsWith("987") || org.isEmpty()) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(new Supplier(number, ten(org)));
+    }
+
+    /** Whether two organisation numbers are the same ("16" + ten digits is the same number). */
+    public static boolean sameOrganisationNumber(String a, String b) {
+        String x = digits(a);
+        return !x.isEmpty() && ten(x).equals(ten(digits(b)));
+    }
+
     /** The value of the one {@code type} attribute in the subject, or null. */
     private static String single(X509Certificate cert, ASN1ObjectIdentifier type) {
         RDN[] rdns = X500Name.getInstance(cert.getSubjectX500Principal().getEncoded()).getRDNs(type);

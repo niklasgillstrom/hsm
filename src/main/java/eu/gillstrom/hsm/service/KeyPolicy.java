@@ -51,6 +51,12 @@ public class KeyPolicy {
         if (this.allowedKeys.isEmpty() || this.allowedCsrSignatureAlgorithms.isEmpty()) {
             throw new IllegalStateException("swish.key-policy: both allow-lists must name at least one entry");
         }
+        for (String alg : this.allowedCsrSignatureAlgorithms) {
+            if (alg.startsWith("sha1") || alg.startsWith("md")) {
+                throw new IllegalStateException("swish.key-policy.allowed-csr-signature-algorithms: " + alg
+                        + " is too weak (SHA-1 and MD2/MD5 are refused)");
+            }
+        }
     }
 
     /** The default policy: RSA-4096, CSR signed with SHA-256 or stronger. */

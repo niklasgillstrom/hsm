@@ -84,8 +84,20 @@ public class ReceiptVerifier {
             log.warn("ReceiptVerifier: null receipt");
             return false;
         }
-        return verifySigned("receipt", receipt.getVerificationId(), receipt.getSignature(),
-                receipt.getSigningCertificate(), () -> ReceiptCanonicalizer.canonicalize(receipt));
+        if (verifySigned("receipt", receipt.getVerificationId(), receipt.getSignature(),
+                receipt.getSigningCertificate(), () -> ReceiptCanonicalizer.canonicalize(receipt))) {
+            return true;
+        }
+        // A receipt signed before 1.6.0 (v2) is retained for five years and
+        // must stay verifiable. v2 does not sign the customer fields or the
+        // supplier number, so it is accepted only for a receipt that has none:
+        // otherwise those fields could be added to an old receipt unsigned.
+        if (ReceiptCanonicalizer.hasCurrentOnlyFields(receipt)) {
+            return false;
+        }
+        return verifySigned("receipt (v2)", receipt.getVerificationId(), receipt.getSignature(),
+                receipt.getSigningCertificate(),
+                () -> ReceiptCanonicalizer.canonicalize(receipt, ReceiptCanonicalizer.PREVIOUS_VERSION));
     }
 
     /**

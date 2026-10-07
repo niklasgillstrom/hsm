@@ -26,10 +26,10 @@ import java.util.List;
  * the operating NCA, in Sweden Finansinspektionen).
  *
  * <p>Note: the wire format submits the <em>public key</em>, not a CSR.
- * Subject DN, BankID material, the Swish number and other surrounding KYC
- * metadata are excluded; the organisation number is sent as
- * {@code supplierIdentifier} and the BankID relying party's name as
- * {@code supplierName}, which the receipt echoes — the gatekeeper certifies the
+ * Subject DN, BankID material and other surrounding KYC metadata are
+ * excluded. The parties are sent and echoed in the receipt: the customer's
+ * organisation and Swish numbers, and, when the request comes from a
+ * technical supplier, the supplier's organisation number and 987 number — the gatekeeper certifies the
  * cryptographic HSM-attestation property only, not the financial entity's
  * own KYC checks.
  */
@@ -52,13 +52,22 @@ public class VerifyRequest {
     /** PEM-encoded chain (excluding manufacturer root, which the gatekeeper pins). */
     private List<String> attestationCertChain;
 
+    /** Organisation number of the customer the certificate is for. */
+    private String customerOrganisationNumber;
+
+    /** The customer's Swish number (123…). */
+    private String customerSwishNumber;
+
     /**
-     * Optional. hsm sends the request's organisation number, the company the
-     * certificate is for (AttestationService.buildVerifyRequest).
+     * Organisation number of the technical supplier that called with its
+     * transport certificate (987…); null when the customer calls itself.
      */
     private String supplierIdentifier;
 
-    /** Optional: human-readable supplier name. */
+    /** The technical supplier's number (987…); null without a technical supplier. */
+    private String supplierNumber;
+
+    /** The technical supplier's name, from BankID when it is the relying party; otherwise null. */
     private String supplierName;
 
     /** Optional: free-text purpose tag, e.g. {@code "Swish payment signing"}. */

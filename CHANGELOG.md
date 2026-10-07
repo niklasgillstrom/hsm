@@ -8,6 +8,40 @@ Versions before 1.4.0 have no entry here; their history is recorded in
 
 ### Security
 
+- **Customer and technical supplier sent to the gatekeeper.** The verify
+  request carried the customer's organisation number as `supplierIdentifier`
+  and the BankID relying party's name as `supplierName`: via a technical
+  supplier the two named different parties, and the supplier's identity was
+  not recorded. hsm now sends the customer (`customerOrganisationNumber`,
+  `customerSwishNumber`) and, when the caller's transport certificate is a
+  technical supplier's (987…), the supplier (`supplierIdentifier` = O,
+  `supplierNumber` = CN, `supplierName` only when the supplier is the BankID
+  relying party). A customer calling with its own 123 certificate has no
+  supplier fields. The receipt must echo all four (`REJECTED_RECEIPT_MISMATCH`
+  otherwise). **Breaking:** receipt canonical form `v3`, in step with
+  gatekeeper 1.6.0. `ReceiptVerifier` still verifies a retained `v2` receipt
+  (1.4.0–1.5.0), but only one without the new fields, so they cannot be added
+  to an old receipt unsigned. Tests: `AttestationServiceGatekeeperFlowTest`
+  (`theGatekeeperIsToldTheCustomerAndTheTechnicalSupplier`,
+  `aCustomerCallingItselfHasNoTechnicalSupplier`,
+  `aSupplierThatIsNotTheRelyingPartyIsNotGivenItsName`, three new receipt
+  mismatch cases), `ReceiptVerifierAlgorithmTest`
+  (`aReceiptSignedBefore160StaysVerifiable`,
+  `partyFieldsCannotBeAddedToAReceiptSignedBefore160`), golden bytes.
+- **Weak CSR signature algorithms could be configured.** The README said
+  SHA-1 and MD5 are refused, but `swish.key-policy.allowed-csr-signature-algorithms`
+  accepted them when an operator listed them. Start-up now fails for any
+  SHA-1 or MD2/MD5 entry (`KeyPolicyTest.weakCsrSignatureAlgorithmsCannotBeConfigured`).
+- **Mutation testing with PIT** (`mvn -Ppit test-compile org.pitest:pitest-maven:mutationCoverage`,
+  PIT 1.30.0 with the JUnit 5 plugin 1.2.3, which runs under JUnit 6.0.3).
+  First run over all of hsm: 2 094 mutations, 76 % killed, test strength
+  88 %, 298 without coverage. Two survivors of the earlier manual run are
+  now killed: ignoring the XML-DSig result
+  (`BankIdSignatureVerificationTest.payloadAlteredAfterSigningIsRejected`)
+  and bypassing the gatekeeper key registry
+  (`ReceiptVerifierAlgorithmTest.aReceiptSignedByAKeyOutsideTheRegistryIsRefused`).
+- **Build:** swagger-ui 5.33.1; Lombok 1.18.48 for the dependency as for the
+  annotation processor (Spring Boot manages 1.18.46).
 - **The caller's transport certificate is bound to the request.** The API is
   called with mTLS, with the company's transport certificate (its Swish
   number, 123…) or the technical supplier's (987…). Until now the service did
