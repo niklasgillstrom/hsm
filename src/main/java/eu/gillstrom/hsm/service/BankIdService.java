@@ -173,12 +173,12 @@ public class BankIdService {
     private final Duration maxSignatureAge;
 
     /**
-     * BankID signatures consumed by an issuance, keyed by SHA-256 of the
-     * signature as submitted, with the time after which they are too old to
-     * verify anyway and are dropped. Held in memory: a deployment with several
+     * BankID signatures used for issuance, keyed by SHA-256 of the signature
+     * as submitted: how many issuances each has had, and the time after which
+     * it is too old to verify anyway and is dropped. Held in memory: a deployment with several
      * instances needs a shared store to refuse a replay across them.
      */
-    private final java.util.concurrent.ConcurrentHashMap<String, Instant> consumed =
+    private final java.util.concurrent.ConcurrentHashMap<String, Use> consumed =
             new java.util.concurrent.ConcurrentHashMap<>();
 
     @Autowired
@@ -213,21 +213,34 @@ public class BankIdService {
     }
 
     /**
-     * Records that a verified BankID signature has been used for an issuance.
+     * Records that a verified BankID signature has been used for one issuance
+     * under its mandate.
      *
-     * <p>The request binding ties a signature to one organisation, Swish
-     * number, CSR and certificate type, so a replay can only obtain another
-     * certificate for the same key; this makes even that a refusal. An entry
-     * is kept until {@code producedAt} plus the maximum signature age and the
-     * clock skew, after which {@link #verify} refuses the signature anyway.</p>
+     * <p>A signature authorises at most {@code count} certificates, the number
+     * its mandate states and the signatory saw; each issuance uses one. An
+     * entry is kept until {@code producedAt} plus the maximum signature age and
+     * the clock skew, after which {@link #verify} refuses the signature
+     * anyway.</p>
      *
-     * @return false if the signature was already consumed
+     * @return false if all {@code count} issuances were already used
      */
-    public boolean consume(String signatureBase64, Instant producedAt) {
+    public boolean consume(String signatureBase64, Instant producedAt, int count) {
         Instant now = clock.instant();
-        consumed.values().removeIf(expiry -> expiry.isBefore(now));
+        consumed.values().removeIf(use -> use.expiry().isBefore(now));
         Instant expiry = (producedAt == null ? now : producedAt).plus(maxSignatureAge).plus(CLOCK_SKEW);
-        return consumed.putIfAbsent(sha256Hex(signatureBase64), expiry) == null;
+        boolean[] granted = {false};
+        consumed.compute(sha256Hex(signatureBase64), (k, use) -> {
+            int used = use == null ? 0 : use.used();
+            if (used >= count) {
+                return use;
+            }
+            granted[0] = true;
+            return new Use(used + 1, expiry);
+        });
+        return granted[0];
+    }
+
+    private record Use(int used, Instant expiry) {
     }
 
     /** For tests: how many consumed signatures are remembered. */
@@ -278,73 +291,73 @@ public class BankIdService {
     // ------------------------------------------------------------------
 
     /**
-     * Version marker of the canonical request-binding format carried in
-     * {@code usrNonVisibleData}. Bump this if the field set or the separator
-     * ever changes; a relying party that does not understand the version must
-     * reject the signature rather than guess.
+     * Version marker of the mandate format carried in {@code usrNonVisibleData}.
+     * Bump this if the field set or the separator ever changes; a relying party
+     * that does not understand the version must reject the signature rather
+     * than guess.
      */
-    public static final String BINDING_VERSION = "hsm-csr:v2";
+    public static final String BINDING_VERSION = "hsm-mandate:v1";
+
+    /** The largest number of certificates one signature can authorise. */
+    public static final int MAX_MANDATE_COUNT = 99;
+
+    private static final java.util.regex.Pattern MANDATE = java.util.regex.Pattern.compile(
+            "hsm-mandate:v1;org=(\\d{10}|\\d{12});swish=(\\d{10});count=([1-9]\\d?)");
 
     /**
-     * The canonical string that the BankID signature's {@code usrNonVisibleData}
-     * must carry, so that the authorisation act is bound to <em>this</em>
-     * certificate request and not merely to some request.
+     * The mandate a BankID signature carries in {@code usrNonVisibleData}: the
+     * organisation and Swish number it covers and how many certificates it
+     * authorises.
      *
      * <p>Format (single line, no padding, no trailing separator):</p>
      *
-     * <pre>hsm-csr:v2;org=&lt;organisationNumber&gt;;swish=&lt;swishNumber&gt;;type=&lt;SIGNING|TRANSPORT&gt;;csr-sha256=&lt;hex&gt;</pre>
+     * <pre>hsm-mandate:v1;org=&lt;organisationNumber&gt;;swish=&lt;swishNumber&gt;;count=&lt;1..99&gt;</pre>
      *
-     * <p>where {@code hex} is lowercase hex of SHA-256 over the CSR's DER
-     * encoding (the bytes inside the PEM armour, not the base64 text). The
-     * relying party sends this string, UTF-8 encoded and then base64 encoded,
-     * as {@code usrNonVisibleData} in the BankID sign order; BankID returns it
-     * base64-encoded inside the signed {@code bankIdSignedData} element, so it
-     * is covered by the XML-DSig Reference and cannot be substituted after the
-     * fact.</p>
+     * <p>The relying party sends this string, UTF-8 encoded and then base64
+     * encoded, as {@code userNonVisibleData} in the BankID sign order; BankID
+     * returns it inside the signed {@code bankIdSignedData} element, so it is
+     * covered by the XML-DSig Reference and cannot be substituted after the
+     * fact. The text the signatory sees must state the same count, as
+     * "(N)" (BankIdConsentPolicy).</p>
      *
-     * <p>{@code type} is the certificate type requested, so an approval for a
-     * SIGNING certificate cannot be presented for a TRANSPORT certificate for
-     * the same key, or the other way round (v1 had no type).</p>
-     *
-     * <p>Without this binding a BankID signature legitimately collected for one
-     * certificate request can be replayed against another request carrying a
-     * different CSR — the signature verifies, the personal number is genuine,
-     * and nothing in the payload contradicts the swap.</p>
+     * <p>The signature is collected once for all N calls, and the technical
+     * supplier creates each CSR just before its own call. A CSR therefore
+     * cannot be bound here (the earlier {@code hsm-csr:v1} bound one CSR to
+     * each signature). What limits the signature instead is
+     * the count, consumed one issuance at a time ({@link #consume}), its age
+     * ({@code swish.bankid.max-signature-age}), the relying party
+     * (BankIdConsentPolicy) and the caller's transport certificate
+     * (CallerPolicy).</p>
      */
-    public static String expectedBinding(String organisationNumber, String swishNumber,
-            eu.gillstrom.hsm.model.VerificationResponse.CertificateType certificateType, byte[] csrDer) {
-        if (csrDer == null) {
-            throw new IllegalArgumentException("csrDer must not be null");
-        }
-        return BINDING_VERSION
-                + ";org=" + (organisationNumber == null ? "" : organisationNumber)
-                + ";swish=" + (swishNumber == null ? "" : swishNumber)
-                + ";type=" + (certificateType == null ? "" : certificateType.name())
-                + ";csr-sha256=" + csrSha256Hex(csrDer);
-    }
+    public record Mandate(String organisationNumber, String swishNumber, int count) {
 
-    /** Lowercase hex of SHA-256 over the CSR's DER encoding. */
-    public static String csrSha256Hex(byte[] csrDer) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(csrDer));
-        } catch (Exception e) {
-            // SHA-256 is JCA-mandatory; unreachable in practice.
-            throw new IllegalStateException("SHA-256 unavailable on this JVM", e);
+        /** The canonical string for this mandate. */
+        public String canonical() {
+            return BINDING_VERSION + ";org=" + organisationNumber + ";swish=" + swishNumber
+                    + ";count=" + count;
+        }
+
+        /** Whether the mandate covers this request's organisation and Swish number. */
+        public boolean covers(String requestOrganisationNumber, String requestSwishNumber) {
+            return organisationNumber.equals(requestOrganisationNumber)
+                    && swishNumber.equals(requestSwishNumber);
         }
     }
 
     /**
-     * Constant-time comparison of the decoded {@code usrNonVisibleData} against
-     * the expected binding string. A missing or blank {@code usrNonVisibleData}
-     * is never a match — fail-closed.
+     * Reads the mandate from the decoded {@code usrNonVisibleData}. Anything
+     * other than exactly the canonical format, including the earlier
+     * {@code hsm-csr} versions, is no mandate: fail-closed.
      */
-    public static boolean isBoundToRequest(String usrNonVisibleData, String expectedBinding) {
-        if (usrNonVisibleData == null || usrNonVisibleData.isBlank() || expectedBinding == null) {
-            return false;
+    public static java.util.Optional<Mandate> parseMandate(String usrNonVisibleData) {
+        if (usrNonVisibleData == null) {
+            return java.util.Optional.empty();
         }
-        return MessageDigest.isEqual(
-                usrNonVisibleData.trim().getBytes(StandardCharsets.UTF_8),
-                expectedBinding.getBytes(StandardCharsets.UTF_8));
+        java.util.regex.Matcher m = MANDATE.matcher(usrNonVisibleData);
+        if (!m.matches()) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(new Mandate(m.group(1), m.group(2), Integer.parseInt(m.group(3))));
     }
 
     /**
@@ -376,10 +389,10 @@ public class BankIdService {
      *   <li>Extract identity data from the signed payload.</li>
      * </ol>
      *
-     * <p>Callers that need the authorisation act bound to a specific
-     * certificate request must additionally compare
-     * {@link BankIdResult#getUsrNonVisibleData()} against
-     * {@link #expectedBinding}; this method verifies
+     * <p>Callers that need the authorisation act bound to a request must
+     * additionally read the mandate from
+     * {@link BankIdResult#getUsrNonVisibleData()} ({@link #parseMandate});
+     * this method verifies
      * that the payload was signed, not what the payload says.</p>
      */
     public BankIdResult verify(String signatureBase64, String ocspBase64) {

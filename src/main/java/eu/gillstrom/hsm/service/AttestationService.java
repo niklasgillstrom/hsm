@@ -166,7 +166,8 @@ public class AttestationService {
         // certificate used to sign a payment is refused at settlement, where
         // only gatekeeper-registered certificates are accepted.
         if (local.getCertificateType() != CertificateType.SIGNING) {
-            if (!bankIdService.consume(request.getBankIdSignatureResponse(), local.getBankIdSignatureTime())) {
+            if (!bankIdService.consume(request.getBankIdSignatureResponse(), local.getBankIdSignatureTime(),
+                    mandateCount(local))) {
                 return IssuanceResponse.rejectedBankIdAlreadyUsed(local, null);
             }
             try {
@@ -229,11 +230,12 @@ public class AttestationService {
                     "RECEIPT_MISMATCH: " + receiptMismatch);
         }
 
-        // The BankID signature authorises one issuance. Consumed only now, so
-        // that a gatekeeper failure above does not cost the signatory a new
-        // signature; a second request with the same signature that got this
-        // far is refused, and its gatekeeper verification closed as not issued.
-        if (!bankIdService.consume(request.getBankIdSignatureResponse(), local.getBankIdSignatureTime())) {
+        // The BankID signature authorises as many issuances as its mandate
+        // states. One is consumed only now, so that a gatekeeper failure above
+        // does not use it up; a request beyond the count that got this far is
+        // refused, and its gatekeeper verification closed as not issued.
+        if (!bankIdService.consume(request.getBankIdSignatureResponse(), local.getBankIdSignatureTime(),
+                    mandateCount(local))) {
             safeConfirmNonIssuance(verifyReceipt, "BANKID_SIGNATURE_ALREADY_USED", request);
             return IssuanceResponse.rejectedBankIdAlreadyUsed(local, verifyReceipt);
         }
@@ -465,6 +467,12 @@ public class AttestationService {
         return Csrs.publicKey(csrPem);
     }
 
+    /** The number of certificates the verified signature's mandate authorises (0 if none). */
+    private static int mandateCount(VerificationResponse local) {
+        return BankIdService.parseMandate(local.getBankIdUsrNonVisibleData())
+                .map(BankIdService.Mandate::count).orElse(0);
+    }
+
     private static String toPublicKeyPem(PublicKey publicKey) {
         StringWriter w = new StringWriter();
         w.append("-----BEGIN PUBLIC KEY-----\n");
@@ -512,7 +520,6 @@ public class AttestationService {
         // Parse CSR
         PublicKey csrPublicKey;
         String keyAlgorithm;
-        byte[] csrDer;
         try {
             PKCS10CertificationRequest csr = parseCsr(request.getCsr());
             // Proof of possession. A PKCS#10 request is self-signed by the
@@ -536,11 +543,6 @@ public class AttestationService {
                 errors.add("KEY_POLICY_VIOLATION: " + policyViolation.get());
                 return buildErrorResponse(errors, certType);
             }
-            // Hash the DER exactly as submitted rather than a re-encoding of
-            // the parsed structure: the client computes its half of the binding
-            // over the bytes it sends, and a re-encoding could in principle
-            // differ from them.
-            csrDer = csrDerBytes(request.getCsr());
         } catch (Exception e) {
             errors.add("Invalid CSR: " + e.getMessage());
             return buildErrorResponse(errors, certType);
@@ -555,19 +557,19 @@ public class AttestationService {
             errors.add("BankID verification failed: " + bankIdResult.getError());
         }
 
-        // Bind the authorisation act to THIS request. The BankID signature
-        // proves that a person signed something; the canonical binding string
-        // in usrNonVisibleData is what proves they signed this organisation
-        // number, this Swish number and this CSR. Without the comparison a
-        // signature legitimately collected for one request can be presented
-        // with another request's CSR.
-        String expectedBinding = BankIdService.expectedBinding(
-                request.getOrganisationNumber(), request.getSwishNumber(), certType, csrDer);
-        if (!BankIdService.isBoundToRequest(bankIdResult.getUsrNonVisibleData(), expectedBinding)) {
+        // Bind the authorisation act to this request. The BankID signature
+        // proves that a person signed something; the mandate in
+        // usrNonVisibleData says which organisation number and Swish number it
+        // covers and how many certificates it authorises. The signature is
+        // collected once for N calls and each CSR is created just before its own
+        // call, so no CSR can be bound here; the count is consumed one issuance
+        // at a time in verifyAndIssue.
+        Optional<BankIdService.Mandate> mandate = BankIdService.parseMandate(bankIdResult.getUsrNonVisibleData());
+        if (mandate.isEmpty() || !mandate.get().covers(request.getOrganisationNumber(), request.getSwishNumber())) {
             errors.add("BANKID_NOT_BOUND_TO_REQUEST: usrNonVisibleData in the BankID signature is "
-                    + "missing or does not equal the canonical binding for this request "
+                    + "missing or is not a mandate for this organisation number and Swish number "
                     + "(expected format " + BankIdService.BINDING_VERSION
-                    + ";org=<organisationNumber>;swish=<swishNumber>;type=<SIGNING|TRANSPORT>;csr-sha256=<hex>)");
+                    + ";org=<organisationNumber>;swish=<swishNumber>;count=<1.." + BankIdService.MAX_MANDATE_COUNT + ">)");
         }
 
         // What the signatory saw, and who asked: the binding above sits in data
@@ -576,7 +578,7 @@ public class AttestationService {
         if (bankIdResult.isValid()) {
             errors.addAll(consentPolicy.violations(bankIdResult.getRelyingPartyOrgNumber(),
                     bankIdResult.getUsrVisibleData(), request.getOrganisationNumber(),
-                    request.getSwishNumber()));
+                    request.getSwishNumber(), mandate.map(BankIdService.Mandate::count).orElse(0)));
         }
 
         // Who called: the transport certificate of the TLS connection must be
@@ -957,16 +959,6 @@ public class AttestationService {
 
     private PKCS10CertificationRequest parseCsr(String csrInput) throws Exception {
         return Csrs.parse(csrInput);
-    }
-
-    /**
-     * The DER encoding of the submitted CSR: the PEM armour and all whitespace
-     * stripped, then base64-decoded. This is the byte sequence the
-     * {@code csr-sha256} component of the BankID request binding is computed
-     * over, on both sides.
-     */
-    private static byte[] csrDerBytes(String csrInput) {
-        return Csrs.der(csrInput);
     }
 
     /**

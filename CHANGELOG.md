@@ -109,22 +109,32 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   signature and its response were accepted at any age and for any number
   of issuances. `producedAt` must now be at most
   `swish.bankid.max-signature-age` (default `PT15M`) old, and neither it
-  nor `thisUpdate` may be more than 5 minutes in the future; a signature is
-  consumed at issuance, and a second issuance with it is refused
-  (`REJECTED_BANKID_ALREADY_USED`, closing the second gatekeeper
-  verification as not issued). Tests: `BankIdSignatureVerificationTest`
-  (`staleProducedAtIsRejected`, `futureProducedAtOrThisUpdateIsRejected`,
-  `aSignatureIsConsumedOnce`, `consumedSignaturesExpire` and others),
-  `AttestationServiceTransportTest.aBankIdSignatureIsUsedOnce`,
-  `AttestationServiceGatekeeperFlowTest.aBankIdSignatureAuthorisesOneSigningIssuance`.
+  nor `thisUpdate` may be more than 5 minutes in the future; and a
+  signature authorises as many issuances as its mandate states (below),
+  after which an issuance is refused (`REJECTED_BANKID_ALREADY_USED`,
+  closing that gatekeeper verification as not issued). Tests:
+  `BankIdSignatureVerificationTest` (`staleProducedAtIsRejected`,
+  `futureProducedAtOrThisUpdateIsRejected`, `aSignatureIsConsumedCountTimes`,
+  `consumptionIsAtomic`, `consumedSignaturesExpire` and others),
+  `AttestationServiceTransportTest.aBankIdSignatureIsUsedCountTimes`,
+  `AttestationServiceGatekeeperFlowTest.aOneCertificateMandateAuthorisesOneSigningIssuance`.
 - **OCSP entries were matched on serial number alone.** A serial number is
   unique only per CA; the entry must now also name the issuing CA by its
   name and key hashes (`sameSerialOtherIssuerIsRejected`).
-- **The certificate type was outside the BankID binding.** An approval for
-  a SIGNING certificate could be presented for a TRANSPORT certificate for
-  the same key. **Breaking:** the binding is now
-  `hsm-csr:v2;org=…;swish=…;type=<SIGNING|TRANSPORT>;csr-sha256=…`, and v1
-  strings are refused (`anApprovalForAnotherCertificateTypeIsRejected`).
+- **The BankID binding did not fit the mandate.** The signatory approves a
+  mandate for N certificates ("fyra (4) Swish-certifikat"), collected once;
+  the technical supplier then makes one call per certificate and creates
+  each CSR just before its call. `hsm-csr:v1` bound each signature to one
+  CSR, so a signature could obtain certificates for one key only, but for
+  that key without limit, and the count the signatory saw was never read.
+  **Breaking:** `usrNonVisibleData` now carries
+  `hsm-mandate:v1;org=…;swish=…;count=<1..99>`; the visible text must state
+  the count as "(N)"; one signature authorises at most N issuances, with any
+  CSRs. `hsm-csr:v1` strings are refused. Tests:
+  `AttestationServiceRequestBindingTest` (`oneMandateCoversSeveralCsrs`,
+  `mandateForAnotherNumberIsRejected`, `csrBoundBindingIsRejected`,
+  `countNotInTheVisibleTextIsRejected`), `BankIdSignatureVerificationTest`
+  (`malformedMandatesAreRejected`), `BankIdConsentPolicyTest.theCountMustBeStated`.
 
 - **A gatekeeper receipt was checked for authenticity and key only.** A
   genuine, compliant receipt for the same key but another country,
@@ -183,7 +193,7 @@ Versions before 1.4.0 have no entry here; their history is recorded in
   `client.GatekeeperClient` component.
 - **README examples** showed `bankIdUsrNonVisibleData` as a bare hash, which
   would be refused with `BANKID_NOT_BOUND_TO_REQUEST`; they now show the
-  binding string.
+  mandate string.
 
 ### Verifiers
 

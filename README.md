@@ -80,7 +80,7 @@ The companion repository `gatekeeper` carries the supervisory side and includes 
   "bankIdPersonalNumber": "19880807****",
   "bankIdName": "Test Testsson",
   "bankIdUsrVisibleData": "Bolagsnamn AB (556954-1234) ger härmed Teknisk leverantör AB (556964-1234) fullmakt att hämta fyra (4) Swish-certifikat för Swish-nummer 1234567890 kopplat till TL-nummer 9876543210.",
-  "bankIdUsrNonVisibleData": "hsm-csr:v2;org=5569541234;swish=1234567890;type=SIGNING;csr-sha256=0b7ee6f76c72db770ed5c7fb2d01f9d6a5e9e3160fe9e4f37c678167d055af1e",
+  "bankIdUsrNonVisibleData": "hsm-mandate:v1;org=5569541234;swish=1234567890;count=4",
   "bankIdRelyingPartyName": "Teknisk leverantör AB",
   "bankIdRelyingPartyOrgNumber": "5569641234",
   "bankIdSignatureTime": "2026-01-15T12:00:00Z",
@@ -113,7 +113,7 @@ The companion repository `gatekeeper` carries the supervisory side and includes 
   "bankIdPersonalNumber": "19880807****",
   "bankIdName": "Test Testsson",
   "bankIdUsrVisibleData": "Bolagsnamn AB (556954-1234) ger härmed Teknisk leverantör AB (556964-1234) fullmakt att hämta fyra (4) Swish-certifikat för Swish-nummer 1234567890 kopplat till TL-nummer 9876543210.",
-  "bankIdUsrNonVisibleData": "hsm-csr:v2;org=5569541234;swish=1234567890;type=TRANSPORT;csr-sha256=0b7ee6f76c72db770ed5c7fb2d01f9d6a5e9e3160fe9e4f37c678167d055af1e",
+  "bankIdUsrNonVisibleData": "hsm-mandate:v1;org=5569541234;swish=1234567890;count=4",
   "bankIdRelyingPartyName": "Teknisk leverantör AB",
   "bankIdRelyingPartyOrgNumber": "5569641234",
   "bankIdSignatureTime": "2026-01-15T12:00:00Z",
@@ -150,14 +150,14 @@ Phase 2 — Gatekeeper.verify (GatekeeperClient.verify, supervisory cross-check)
       │   Receipt's publicKeyFingerprint compared against the CSR's public key
       │   Receipt must be within 5 minutes of now and echo the request's country,
       │   supplier, key purpose and HSM vendor, with key properties of a compliant key
-      │   The BankID signature is consumed (one issuance per signature)
+      │   One of the BankID mandate's `count` issuances is used
       │
       ├─ call failed → stage=REJECTED_GATEKEEPER_VERIFY_FAILED
       ├─ compliant=false → stage=REJECTED_GATEKEEPER_NOT_COMPLIANT
       ├─ signature invalid → stage=REJECTED_GATEKEEPER_RECEIPT_INVALID
       ├─ receipt approves a different key → stage=REJECTED_RECEIPT_KEY_MISMATCH
       ├─ receipt is not this request's → stage=REJECTED_RECEIPT_MISMATCH
-      ├─ BankID signature already used → stage=REJECTED_BANKID_ALREADY_USED (confirm: not issued)
+      ├─ mandate's count used up → stage=REJECTED_BANKID_ALREADY_USED (confirm: not issued)
       │
       ▼
 Phase 3 — Issuance (IssuanceClient.issue, certificate produced)
@@ -248,26 +248,25 @@ Numbered pipeline:
 6. **Server-enforced certificate type** *(DORA-mandated)*: SIGNING requests that do not carry attestation evidence are rejected. TRANSPORT requests that do carry attestation data are rejected as ambiguous.
 7. **Issue certificate**: The Swish CA issues a transport or signing certificate matching the validated request type.
 
-### BankID request binding
+### BankID mandate
 
-A BankID signature proves that a person signed *something*. To make it prove that they authorised *this* certificate request, the relying party puts a canonical binding string in `usrNonVisibleData` when creating the BankID sign order. BankID returns it inside the signed `bankIdSignedData` element, so it is covered by the XML-DSig Reference and cannot be substituted after signing.
+A BankID signature proves that a person signed *something*. To make it prove that they authorised certificates for *this* organisation and Swish number, the relying party (the technical supplier) puts a mandate string in `usrNonVisibleData` when creating the BankID sign order. BankID returns it inside the signed `bankIdSignedData` element, so it is covered by the XML-DSig Reference and cannot be substituted after signing.
 
 The string, exactly (single line, no padding, no trailing separator):
 
 ```
-hsm-csr:v2;org=<organisationNumber>;swish=<swishNumber>;type=<SIGNING|TRANSPORT>;csr-sha256=<lowercase hex SHA-256 over the CSR's DER encoding>
+hsm-mandate:v1;org=<organisationNumber>;swish=<swishNumber>;count=<1..99>
 ```
 
-- `<organisationNumber>` and `<swishNumber>` are the values sent in the same request, verbatim.
-- `<type>` is the request's `certificateType`, so an approval for one certificate type cannot be presented for the other. Version 1 (1.4.0–1.5.0) had no type and is no longer accepted.
-- `<csr-sha256>` is SHA-256 over the **DER** encoding of the PKCS#10 request — the bytes inside the PEM armour, not the base64 text and not the PEM string. With OpenSSL: `openssl req -in request.csr -outform DER | sha256sum`.
-- The string is UTF-8 encoded and base64 encoded once, into the BankID sign order's `userNonVisibleData` parameter. It comes back base64-encoded in the `usrNonVisibleData` element of the signature XML; `BankIdService` decodes that layer and compares the resulting string.
+- `<organisationNumber>` (10 or 12 digits) and `<swishNumber>` (10 digits) must equal the values sent in each request, verbatim.
+- `<count>` is the number of certificates the signatory authorises. The visible text must state the same number in parentheses, as in "fyra (4) Swish-certifikat" (`BankIdConsentPolicy`).
+- The string is UTF-8 encoded and base64 encoded once, into the BankID sign order's `userNonVisibleData` parameter. It comes back base64-encoded in the `usrNonVisibleData` element of the signature XML; `BankIdService` decodes that layer and reads the mandate. Anything other than exactly this format is no mandate (`BANKID_NOT_BOUND_TO_REQUEST`).
 
-`AttestationService` recomputes the string from the request in hand and requires byte equality (`MessageDigest.isEqual`).
+The signature is collected once, and the technical supplier then makes one call per certificate, creating each CSR just before its call. A CSR therefore cannot be named in the mandate, and one signature serves up to `count` requests with different CSRs. 1.4.0–1.5.0 bound each signature to one CSR (`hsm-csr:v1;org=…;swish=…;csr-sha256=…`), which allowed one key per signature, contrary to a mandate for several certificates, but did not limit how often that key was issued; that format is no longer accepted. What bounds a signature now: the count, the age limit below, the allowed relying parties and the caller's transport certificate (`CallerPolicy`), so only the company itself or the technical supplier that collected the signature can use it.
 
-A BankID signature is accepted only while it is fresh: the OCSP response's `producedAt` (the signing time) must be at most `swish.bankid.max-signature-age` old (default 15 minutes) and, like the entry's `thisUpdate`, no more than 5 minutes in the future. BankID's OCSP responses carry no `nextUpdate` (the production example above has none), so this is the only age limit. A signature authorises one issuance: `verifyAndIssue` consumes it just before issuing, and a second issuance with the same signature is refused with `REJECTED_BANKID_ALREADY_USED`. The record of consumed signatures is held in memory for as long as the signature is fresh; several instances behind a load balancer need a shared store to refuse a replay across them.
+A BankID signature is accepted only while it is fresh: the OCSP response's `producedAt` (the signing time) must be at most `swish.bankid.max-signature-age` old (default 15 minutes) and, like the entry's `thisUpdate`, no more than 5 minutes in the future. BankID's OCSP responses carry no `nextUpdate` (the production example above has none), so this is the only age limit. A signature authorises `count` issuances: `verifyAndIssue` uses one just before issuing, and an issuance beyond the count is refused with `REJECTED_BANKID_ALREADY_USED`. The record of used signatures is held in memory for as long as the signature is fresh; several instances behind a load balancer need a shared store to refuse a replay across them.
 
-The binding sits in data the signatory never sees, so two further checks apply (`BankIdConsentPolicy`). The BankID relying party, whose organisation number is in `srvInfo` inside the signed data, must be listed in `swish.bankid.allowed-relying-parties` (`BANKID_RELYING_PARTY_NOT_ALLOWED`). And `usrVisibleData`, the text the signatory approved, must contain the request's organisation number (with or without hyphen) and Swish number (`BANKID_VISIBLE_TEXT_MISMATCH`). The wording is otherwise free; the mandate text in the response example above satisfies it. A missing `usrNonVisibleData`, or one belonging to a different organisation number, Swish number or CSR, is rejected with `BANKID_NOT_BOUND_TO_REQUEST`. Without this check, a signature legitimately collected for one request can be replayed with another request's CSR: the signature verifies, the personal number is genuine, and nothing else in the payload contradicts the swap.
+The mandate sits in data the signatory never sees, so further checks apply (`BankIdConsentPolicy`). The BankID relying party, whose organisation number is in `srvInfo` inside the signed data, must be listed in `swish.bankid.allowed-relying-parties` (`BANKID_RELYING_PARTY_NOT_ALLOWED`). And `usrVisibleData`, the text the signatory approved, must contain the request's organisation number (with or without hyphen), its Swish number and the mandate's count in parentheses (`BANKID_VISIBLE_TEXT_MISMATCH`). The wording is otherwise free; the mandate text in the response example above satisfies it. A missing `usrNonVisibleData`, or a mandate for a different organisation number or Swish number, is rejected with `BANKID_NOT_BOUND_TO_REQUEST`.
 
 Who calls is checked as well (`CallerPolicy`). The API is called with mTLS, with the company's transport certificate (Swish number 123…) or the technical supplier's (987…). Both carry the number in CN and the organisation number in O, as in the requests in `examples/` (`C=SE, O=5569743098, CN=1231015932`). A 123 certificate may only request certificates for its own Swish number and organisation number; a 987 certificate only for requests whose BankID order it started as relying party. Any other certificate, or none, is refused (`CALLER_NOT_BOUND`, `CALLER_CERTIFICATE_MISSING`). The chain and validity of the certificate are checked by the TLS layer (`server.ssl.client-auth=need`, the Swish CA in the trust store); `CallerPolicy` reads the identity the handshake established.
 

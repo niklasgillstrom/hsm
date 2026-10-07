@@ -44,10 +44,11 @@ class AttestationServiceGatekeeperFlowTest {
     private static final String ORG = "5569743098";
     private static final String SWISH = "1231015932";
 
-    /** A mandate text naming this request's organisation and Swish number, as BankIdConsentPolicy requires. */
-    private static final String MANDATE =
-            "Testbolaget AB (556974-3098) ger harmed Teknisk leverantor AB fullmakt att hamta "
-            + "Swish-certifikat for Swish-nummer 1231015932.";
+    /** A mandate text naming this request's organisation, Swish number and count, as BankIdConsentPolicy requires. */
+    private static String mandateText(int count) {
+        return "Testbolaget AB (556974-3098) ger harmed Teknisk leverantor AB fullmakt att hamta (" + count
+                + ") Swish-certifikat for Swish-nummer 1231015932.";
+    }
     /** The fixture's BankID relying party (srvInfo serialNumber). */
     private static final BankIdConsentPolicy TEST_CONSENT_POLICY = new BankIdConsentPolicy("5566778899");
 
@@ -214,7 +215,7 @@ class AttestationServiceGatekeeperFlowTest {
 
     @Test
     @EnabledIf("yubicoFixturePresent")
-    void aBankIdSignatureAuthorisesOneSigningIssuance() throws Exception {
+    void aOneCertificateMandateAuthorisesOneSigningIssuance() throws Exception {
         AttestationService service = service("SE");
         CertificateRequest request = signingRequest();
         assertThat(service.verifyAndIssue(request).getStage())
@@ -271,8 +272,8 @@ class AttestationServiceGatekeeperFlowTest {
         for (JsonNode c : n.get("attestationCertChain")) {
             chain.add(c.asText());
         }
-        String binding = BankIdService.expectedBinding(ORG, SWISH, eu.gillstrom.hsm.model.VerificationResponse.CertificateType.SIGNING, TestPki.csrDer(csrPem));
-        String signature = fx.signedResponseBoundTo(MANDATE, binding);
+        String signature = fx.signedResponseBoundTo(mandateText(1),
+                new BankIdService.Mandate(ORG, SWISH, 1).canonical());
 
         CertificateRequest r = new CertificateRequest();
         r.setCsr(csrPem);

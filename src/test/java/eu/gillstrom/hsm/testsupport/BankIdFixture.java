@@ -175,8 +175,8 @@ public final class BankIdFixture {
 
     /**
      * A signed BankID response carrying a specific {@code usrNonVisibleData}
-     * payload — used to exercise the canonical request binding produced by
-     * {@code BankIdService.expectedBinding(...)}.
+     * payload — used to exercise the mandate read by
+     * {@code BankIdService.parseMandate(...)}.
      */
     public String signedResponseBoundTo(String visibleText, String nonVisibleData) throws Exception {
         return signedResponseBase64(visibleText, false, false, nonVisibleData);
@@ -329,6 +329,13 @@ public final class BankIdFixture {
         Element name = doc.createElementNS(BANKID_NS, "name");
         name.setTextContent(b64("name=Testbolaget,serialNumber=5566778899,o=Testbank,c=SE"));
         srv.appendChild(name);
+        // A fresh value per order, so two orders with the same texts are two
+        // different signatures (issuances are counted per signature).
+        Element nonce = doc.createElementNS(BANKID_NS, "nonce");
+        byte[] random = new byte[16];
+        new java.security.SecureRandom().nextBytes(random);
+        nonce.setTextContent(Base64.getEncoder().encodeToString(random));
+        srv.appendChild(nonce);
         sd.appendChild(srv);
         return sd;
     }

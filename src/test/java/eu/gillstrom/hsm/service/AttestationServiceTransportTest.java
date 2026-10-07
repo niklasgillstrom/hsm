@@ -36,10 +36,11 @@ class AttestationServiceTransportTest {
     private static final KeyPolicy TEST_KEY_POLICY =
             new KeyPolicy("RSA-2048", KeyPolicy.DEFAULT_ALLOWED_CSR_SIGNATURE_ALGORITHMS);
 
-    /** A mandate text naming this request's organisation and Swish number, as BankIdConsentPolicy requires. */
-    private static final String MANDATE =
-            "Testbolaget AB (556974-3098) ger harmed Teknisk leverantor AB fullmakt att hamta "
-            + "Swish-certifikat for Swish-nummer 1231015932.";
+    /** A mandate text naming this request's organisation, Swish number and count, as BankIdConsentPolicy requires. */
+    private static String mandateText(int count) {
+        return "Testbolaget AB (556974-3098) ger harmed Teknisk leverantor AB fullmakt att hamta (" + count
+                + ") Swish-certifikat for Swish-nummer 1231015932.";
+    }
     /** The fixture's BankID relying party (srvInfo serialNumber). */
     private static final BankIdConsentPolicy TEST_CONSENT_POLICY = new BankIdConsentPolicy("5566778899");
 
@@ -91,14 +92,18 @@ class AttestationServiceTransportTest {
     }
 
     @Test
-    @DisplayName("A BankID signature authorises one TRANSPORT issuance")
-    void aBankIdSignatureIsUsedOnce() throws Exception {
+    @DisplayName("A BankID signature authorises as many issuances as its mandate states, each with its own CSR")
+    void aBankIdSignatureIsUsedCountTimes() throws Exception {
         AttestationService service = service(
                 (pnr, org, swish) -> SignatoryRightsVerifier.Result.authorised("test"));
-        CertificateRequest request = boundTransportRequest();
+        String signature = fx.signedResponseBoundTo(mandateText(3),
+                new BankIdService.Mandate(ORG, SWISH, 3).canonical());
 
-        assertThat(service.verifyAndIssue(request).isIssued()).isTrue();
-        IssuanceResponse again = service.verifyAndIssue(request);
+        for (int i = 0; i < 3; i++) {
+            IssuanceResponse r = service.verifyAndIssue(transportRequest(signature));
+            assertThat(r.isIssued()).as("issuance %d of 3: %s", i + 1, r.getErrors()).isTrue();
+        }
+        IssuanceResponse again = service.verifyAndIssue(transportRequest(signature));
 
         assertThat(again.isIssued()).isFalse();
         assertThat(again.getStage().name()).isEqualTo("REJECTED_BANKID_ALREADY_USED");
@@ -204,14 +209,18 @@ class AttestationServiceTransportTest {
     }
 
     private CertificateRequest boundTransportRequest() throws Exception {
-        return boundTransportRequest(MANDATE);
+        return boundTransportRequest(mandateText(1));
     }
 
     private CertificateRequest boundTransportRequest(String visibleText) throws Exception {
+        return transportRequest(fx.signedResponseBoundTo(visibleText,
+                new BankIdService.Mandate(ORG, SWISH, 1).canonical()));
+    }
+
+    /** A TRANSPORT request with a CSR of its own, under the given signature. */
+    private CertificateRequest transportRequest(String signature) throws Exception {
         KeyPair subject = TestPki.newRsaKeyPair(2048);
         String csrPem = TestPki.csrPem(subject, "Test Supplier", subject.getPrivate());
-        String binding = BankIdService.expectedBinding(ORG, SWISH, eu.gillstrom.hsm.model.VerificationResponse.CertificateType.TRANSPORT, TestPki.csrDer(csrPem));
-        String signature = fx.signedResponseBoundTo(visibleText, binding);
 
         CertificateRequest r = new CertificateRequest();
         r.setCsr(csrPem);

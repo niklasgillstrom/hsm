@@ -32,7 +32,10 @@ import java.util.stream.Collectors;
  *       organisation number and Swish number, so the signatory has seen which
  *       organisation and which Swish number the authorisation covers. The
  *       wording is otherwise free; an organisation number may be written with
- *       a hyphen (556954-1234).</li>
+ *       a hyphen (556954-1234). It must also state the number of certificates
+ *       the mandate in the non-visible data authorises, in parentheses, as in
+ *       "fyra (4) Swish-certifikat", so the signatory has seen how many
+ *       certificates the signature can obtain.</li>
  * </ol>
  */
 @Component
@@ -60,7 +63,7 @@ public class BankIdConsentPolicy {
 
     /** @return the violations, empty if the signature satisfies both checks */
     public List<String> violations(String relyingPartyOrgNumber, String usrVisibleData,
-            String organisationNumber, String swishNumber) {
+            String organisationNumber, String swishNumber, int mandateCount) {
         List<String> out = new ArrayList<>();
         String rp = digits(relyingPartyOrgNumber);
         if (rp.isEmpty() || !allowedRelyingParties.contains(rp)) {
@@ -76,6 +79,10 @@ public class BankIdConsentPolicy {
         if (!containsNumber(text, digits(swishNumber))) {
             out.add("BANKID_VISIBLE_TEXT_MISMATCH: the text the signatory approved does not contain "
                     + "the Swish number of this request");
+        }
+        if (mandateCount > 0 && !Pattern.compile("\\(\\s*" + mandateCount + "\\s*\\)").matcher(text).find()) {
+            out.add("BANKID_VISIBLE_TEXT_MISMATCH: the text the signatory approved does not state "
+                    + "the number of certificates in the mandate, as (" + mandateCount + ")");
         }
         return out;
     }
