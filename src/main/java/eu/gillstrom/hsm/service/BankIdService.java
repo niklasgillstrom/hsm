@@ -480,10 +480,11 @@ public class BankIdService {
             BankIdResult result = new BankIdResult();
             result.setValid(signatureValid && chainValid);
             result.setSignatureValid(signatureValid);
+            // chainValid is true here: without a validated chain issuerOf() is
+            // null, checkOcsp reports OCSP_RESPONDER_CHAIN_INVALID and the
+            // method has already returned.
             if (dsigError != null) {
                 result.setError(dsigError);
-            } else if (!chainValid) {
-                result.setError("Certificate chain validation failed");
             }
             result.setPersonalNumber(personalNumber);
             result.setName(name);

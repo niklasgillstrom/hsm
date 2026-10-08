@@ -133,10 +133,13 @@ class MockGatekeeperClientTest {
         assertThat(match.getPublicKeyMatch()).isTrue();
         assertThat(match.getRegistryStatus())
                 .isEqualTo(IssuanceConfirmResponse.RegistryStatus.VERIFIED_AND_ISSUED);
+        assertThat(match.getAnomalies()).isEmpty();
         assertThat(mismatch.isLoopClosed()).isFalse();
         assertThat(mismatch.getPublicKeyMatch()).isFalse();
         assertThat(mismatch.getRegistryStatus())
                 .isEqualTo(IssuanceConfirmResponse.RegistryStatus.ANOMALY_PUBLIC_KEY_MISMATCH);
+        assertThat(mismatch.getAnomalies())
+                .containsExactly("public key in issued certificate does not match attested public key");
     }
 
     @Test

@@ -341,6 +341,7 @@
                                 <param>${pit.targetTests}</param>
                             </targetTests>
                             <threads>${pit.threads}</threads>
+                            <mutationThreshold>100</mutationThreshold>
                             <timestampedReports>false</timestampedReports>
                             <outputFormats>
                                 <param>HTML</param>

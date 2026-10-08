@@ -635,12 +635,12 @@ class AttestationServiceDispatchTest {
     @Test
     void eachReceiptMismatchIsNamed() {
         Instant now = Instant.now();
-        VerifyRequest sent = VerifyRequest.builder().hsmVendor("ENTRUST").countryCode("SE")
+        VerifyRequest sent = VerifyRequest.builder().hsmVendor("AZURE").countryCode("SE")
                 .customerOrganisationNumber(ORG).customerSwishNumber(SWISH).keyPurpose("Swish SIGNING").build();
         VerifyResponse ok = receipt();
         ok.setVerificationTimestamp(now);
-        // gatekeeper reports the vendor's name, not the token.
-        ok.setHsmVendor(HsmVendor.ENTRUST.getVendorName());
+        // gatekeeper reports the vendor's name ("Microsoft"), not the token.
+        ok.setHsmVendor(HsmVendor.AZURE.getVendorName());
         assertThat(AttestationService.receiptMismatch(ok, sent, now)).isNull();
 
         VerifyResponse r = receipt();
@@ -667,10 +667,10 @@ class AttestationServiceDispatchTest {
         r = receipt();
         r.setVerificationTimestamp(now);
         r.setHsmVendor("Yubico");
-        assertThat(AttestationService.receiptMismatch(r, sent, now)).isEqualTo("hsmVendor Yubico is not ENTRUST");
+        assertThat(AttestationService.receiptMismatch(r, sent, now)).isEqualTo("hsmVendor Yubico is not AZURE");
         r = receipt();
         r.setVerificationTimestamp(now);
-        r.setHsmVendor("ENTRUST");
+        r.setHsmVendor("AZURE");
         r.setKeyProperties(null);
         assertThat(AttestationService.receiptMismatch(r, sent, now)).isEqualTo("keyProperties null contradict compliance");
     }
