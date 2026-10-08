@@ -25,7 +25,77 @@ class RequestSizeLimitFilterTest {
         filter.doFilter(request, response, chain);
 
         assertThat(response.getStatus()).isEqualTo(413);
+        assertThat(response.getContentType()).isEqualTo("application/json;charset=UTF-8");
+        assertThat(response.getContentAsString()).contains("\"error\":\"request_too_large\"");
         assertThat(chain.getRequest()).as("the chain is not entered").isNull();
+    }
+
+    @Test
+    void aDeclaredEmptyBodyIsPassedThroughUnwrapped() throws Exception {
+        RequestSizeLimitFilter filter = new RequestSizeLimitFilter("16B");
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/attestation/verifyAndIssue");
+        request.setContent(new byte[0]);
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, new MockHttpServletResponse(), chain);
+
+        assertThat(request.getContentLengthLong()).isZero();
+        assertThat(chain.getRequest()).isSameAs(request);
+    }
+
+    /** Records what the counting stream forwards to the stream it wraps. */
+    private static final class RecordingStream extends jakarta.servlet.ServletInputStream {
+        private final java.io.ByteArrayInputStream bytes = new java.io.ByteArrayInputStream(new byte[] {7, 8, 9});
+        boolean closed;
+        jakarta.servlet.ReadListener listener;
+
+        @Override public int read() { return bytes.read(); }
+        @Override public int available() { return bytes.available(); }
+        @Override public void close() { closed = true; }
+        @Override public boolean isFinished() { return bytes.available() == 0; }
+        @Override public boolean isReady() { return !closed; }
+        @Override public void setReadListener(jakarta.servlet.ReadListener readListener) { listener = readListener; }
+    }
+
+    @Test
+    void theCountingStreamForwardsToTheStreamItWraps() throws Exception {
+        RecordingStream underlying = new RecordingStream();
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/attestation/verifyAndIssue") {
+            @Override
+            public long getContentLengthLong() {
+                return -1;
+            }
+
+            @Override
+            public jakarta.servlet.ServletInputStream getInputStream() {
+                return underlying;
+            }
+        };
+        AtomicReference<HttpServletRequest> seen = new AtomicReference<>();
+        new RequestSizeLimitFilter("16B").doFilter(request, new MockHttpServletResponse(),
+                (req, res) -> seen.set((HttpServletRequest) req));
+        var in = seen.get().getInputStream();
+        assertThat(in).isNotSameAs(underlying);
+
+        assertThat(in.read()).isEqualTo(7);
+        assertThat(in.available()).isEqualTo(2);
+        assertThat(in.isFinished()).isFalse();
+        assertThat(in.isReady()).isTrue();
+        assertThat(in.read()).isEqualTo(8);
+        assertThat(in.read()).isEqualTo(9);
+        assertThat(in.isFinished()).isTrue();
+
+        jakarta.servlet.ReadListener listener = new jakarta.servlet.ReadListener() {
+            @Override public void onDataAvailable() { }
+            @Override public void onAllDataRead() { }
+            @Override public void onError(Throwable t) { }
+        };
+        in.setReadListener(listener);
+        assertThat(underlying.listener).isSameAs(listener);
+
+        in.close();
+        assertThat(underlying.closed).isTrue();
+        assertThat(in.isReady()).isFalse();
     }
 
     @Test
