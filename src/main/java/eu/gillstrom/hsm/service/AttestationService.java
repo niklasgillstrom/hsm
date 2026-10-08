@@ -401,6 +401,7 @@ public class AttestationService {
         }
     }
 
+    /** @param local the result of {@link #verify}, which is never null */
     private static VerifyRequest buildVerifyRequest(CertificateRequest request,
             VerificationResponse local, String countryCode, X509Certificate caller) {
         try {
@@ -411,7 +412,7 @@ public class AttestationService {
             // party). A customer that calls with its own 123 certificate has
             // no technical supplier, and the supplier fields stay empty.
             java.util.Optional<CallerPolicy.Supplier> supplier = CallerPolicy.supplierOf(caller);
-            String supplierName = supplier.isPresent() && local != null
+            String supplierName = supplier.isPresent()
                     && CallerPolicy.sameOrganisationNumber(local.getBankIdRelyingPartyOrgNumber(),
                             supplier.get().organisationNumber())
                     ? local.getBankIdRelyingPartyName() : null;
@@ -426,7 +427,7 @@ public class AttestationService {
                     .supplierIdentifier(supplier.map(CallerPolicy.Supplier::organisationNumber).orElse(null))
                     .supplierNumber(supplier.map(CallerPolicy.Supplier::number).orElse(null))
                     .supplierName(supplierName)
-                    .keyPurpose(local == null ? null : ("Swish " + local.getCertificateType()))
+                    .keyPurpose("Swish " + local.getCertificateType())
                     .countryCode(countryCode)
                     .build();
         } catch (Exception e) {

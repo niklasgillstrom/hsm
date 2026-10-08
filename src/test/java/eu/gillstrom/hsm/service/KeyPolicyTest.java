@@ -120,4 +120,13 @@ class KeyPolicyTest {
         org.assertj.core.api.Assertions.assertThatCode(() -> new KeyPolicy("RSA-4096", "SHA512withRSA"))
                 .doesNotThrowAnyException();
     }
+
+    @Test
+    @DisplayName("A key that is neither RSA nor a named EC curve is described by its algorithm OID")
+    void otherKeysAreDescribedByTheirAlgorithmOid() throws Exception {
+        java.security.PublicKey ed = KeyPairGenerator.getInstance("Ed25519").generateKeyPair().getPublic();
+        assertThat(KeyPolicy.describeKey(
+                org.bouncycastle.asn1.x509.SubjectPublicKeyInfo.getInstance(ed.getEncoded()), ed))
+                .isEqualTo("1.3.101.112");
+    }
 }
