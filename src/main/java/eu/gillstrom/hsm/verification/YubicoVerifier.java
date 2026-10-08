@@ -24,6 +24,11 @@ import java.util.Set;
 @Component
 public class YubicoVerifier implements HsmAttestationVerifier {
 
+    /** Text before the first '(' contains no ')', then the serial up to the first ')'. */
+    private static final java.util.regex.Pattern DEVICE_SERIAL =
+            java.util.regex.Pattern.compile("^[^()]+\\(([^)]*)\\)");
+
+
     private static final Logger log = LoggerFactory.getLogger(YubicoVerifier.class);
 
     // Yubico YubiHSM Root CA — genuine vendor-issued root.
@@ -161,11 +166,11 @@ public class YubicoVerifier implements HsmAttestationVerifier {
             if (chain.length > 1) {
                 String cn = chain[1].getSubjectX500Principal().getName();
                 if (cn.contains("Attestation")) {
-                    // Format: YubiHSM Attestation (XXXXXXXX)
-                    int start = cn.indexOf('(');
-                    int end = cn.indexOf(')');
-                    if (start > 0 && end > start) {
-                        result.setDeviceSerial(cn.substring(start + 1, end));
+                    // Format: YubiHSM Attestation (XXXXXXXX): the text between the
+                    // first '(' and the first ')', when a ')' does not come first.
+                    java.util.regex.Matcher serial = DEVICE_SERIAL.matcher(cn);
+                    if (serial.find()) {
+                        result.setDeviceSerial(serial.group(1));
                     }
                 }
             }

@@ -445,7 +445,8 @@ public final class MarvellAttestation {
             return false;
         }
         BigInteger s = new BigInteger(1, parsed.signature());
-        if (s.signum() == 0 || s.compareTo(key.getModulus()) >= 0) {
+        // The signature representative must lie in [1, n - 1] (RFC 8017, 5.2.2).
+        if (s.signum() == 0 || !s.equals(s.mod(key.getModulus()))) {
             return false;
         }
         byte[] m = s.modPow(key.getPublicExponent(), key.getModulus()).toByteArray();

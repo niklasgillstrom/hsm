@@ -8,7 +8,6 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import eu.gillstrom.hsm.model.HsmVendor;
 
-import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.ByteArrayInputStream;
@@ -238,8 +237,9 @@ public class SecurosysVerifier implements HsmAttestationVerifier {
      * off by default ({@link DocumentBuilderFactory#isXIncludeAware()}).</p>
      */
     private Document parseXmlSafely(byte[] xmlBytes) throws Exception {
-        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
-        dbf.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        // newDefaultInstance() is always the JDK's built-in parser, whatever else
+        // is on the classpath; it applies the jdk.xml.* resource limits by default.
+        DocumentBuilderFactory dbf = DocumentBuilderFactory.newDefaultInstance();
         dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
         DocumentBuilder db = dbf.newDocumentBuilder();
         return db.parse(new ByteArrayInputStream(xmlBytes));

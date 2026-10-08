@@ -206,6 +206,24 @@ class SecurosysVerifierMutationTest {
     }
 
     @Test
+    void theParserIsTheJdksWithSecureProcessingAndItsResourceLimits() throws Exception {
+        assertThat(javax.xml.parsers.DocumentBuilderFactory.newDefaultInstance()
+                .getFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING)).isTrue();
+
+        StringBuilder attributes = new StringBuilder();
+        for (int i = 0; i <= 10_000; i++) {
+            attributes.append(" a").append(i).append("=\"x\"");
+        }
+        Signed s = sign("<private_key creation=\"generated\"" + attributes + "><label>l</label></private_key>");
+
+        SecurosysVerifier.SecurosysAttestationResult r = verifier.verifySecurosysAttestation(
+                s.xml, s.signature, chainPem, attestationKp.getPublic());
+
+        assertThat(r.getErrors()).anyMatch(e -> e.startsWith("Verification error") && e.contains("JAXP00010002"));
+        assertThat(r.isValid()).isFalse();
+    }
+
+    @Test
     void anXIncludeElementIsNotProcessed() throws Exception {
         String attested = Base64.getEncoder().encodeToString(attestationKp.getPublic().getEncoded());
         Signed s = sign("<private_key creation=\"generated\" xmlns:xi=\"http://www.w3.org/2001/XInclude\">"
