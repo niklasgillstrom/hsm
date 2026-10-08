@@ -112,6 +112,11 @@ public final class BankIdFixture {
     public final X509Certificate expiredOcspCert;
 
     public BankIdFixture() throws Exception {
+        this("CN=" + TEST_NAME + ",SERIALNUMBER=" + TEST_PERSONAL_NUMBER + ",C=SE");
+    }
+
+    /** @param personSubject the subject DN of the signatory's certificate */
+    public BankIdFixture(String personSubject) throws Exception {
         rootKp = TestPki.newRsaKeyPair(2048);
         rootCert = TestPki.selfSignedCa(rootKp, "Test BankID Fixture Root");
 
@@ -120,7 +125,7 @@ public final class BankIdFixture {
                 rootCert, rootKp.getPrivate());
 
         personKp = TestPki.newRsaKeyPair(2048);
-        personCert = person(personKp, bankCaCert, bankCaKp.getPrivate());
+        personCert = person(personKp, personSubject, bankCaCert, bankCaKp.getPrivate());
 
         ocspKp = TestPki.newRsaKeyPair(2048);
         ocspCert = TestPki.ocspResponder(ocspKp, "Test Bank CA v1 for BankID OCSP Signing",
@@ -155,10 +160,9 @@ public final class BankIdFixture {
         return Collections.singleton(new java.security.cert.TrustAnchor(rootCert, null));
     }
 
-    private static X509Certificate person(KeyPair kp, X509Certificate issuer, PrivateKey issuerKey)
-            throws Exception {
-        X500Name subject = new X500Name(
-                "CN=" + TEST_NAME + ",SERIALNUMBER=" + TEST_PERSONAL_NUMBER + ",C=SE");
+    private static X509Certificate person(KeyPair kp, String personSubject, X509Certificate issuer,
+            PrivateKey issuerKey) throws Exception {
+        X500Name subject = new X500Name(personSubject);
         long now = System.currentTimeMillis();
         JcaX509v3CertificateBuilder b = new JcaX509v3CertificateBuilder(
                 new X500Name(issuer.getSubjectX500Principal().getName()),

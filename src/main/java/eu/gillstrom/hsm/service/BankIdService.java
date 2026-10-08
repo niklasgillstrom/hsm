@@ -22,7 +22,6 @@ import org.w3c.dom.NodeList;
 import javax.naming.InvalidNameException;
 import javax.naming.ldap.LdapName;
 import javax.naming.ldap.Rdn;
-import javax.xml.XMLConstants;
 import javax.xml.crypto.KeySelector;
 import javax.xml.crypto.dsig.XMLSignature;
 import javax.xml.crypto.dsig.XMLSignatureFactory;
@@ -508,17 +507,21 @@ public class BankIdService {
     }
 
     /**
-     * Parse XML with XXE and related external-entity attacks disabled.
+     * Parse XML with XXE and external-entity protection.
+     *
+     * <p>Any DOCTYPE is a fatal error ({@code disallow-doctype-decl}; a parser
+     * that does not support the feature makes {@code setFeature} throw, so the
+     * signature is refused). Without a DOCTYPE there is no DTD, no external
+     * DTD to load, no general or parameter entity to declare or expand, and no
+     * entity reference other than the five predefined ones, so the separate
+     * entity and external-DTD switches have nothing left to act on. XInclude is
+     * off by default ({@link DocumentBuilderFactory#isXIncludeAware()}).</p>
      */
     private Document parseXmlSafely(byte[] xmlBytes) throws Exception {
-        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
-        dbf.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        // newDefaultInstance() is always the JDK's built-in parser, whatever else
+        // is on the classpath; it applies the jdk.xml.* resource limits by default.
+        DocumentBuilderFactory dbf = DocumentBuilderFactory.newDefaultInstance();
         dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
-        dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
-        dbf.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-        dbf.setXIncludeAware(false);
-        dbf.setExpandEntityReferences(false);
         // BankID signatures rely on element IDs for the Reference URI lookup.
         dbf.setNamespaceAware(true);
         DocumentBuilder db = dbf.newDocumentBuilder();
@@ -531,7 +534,7 @@ public class BankIdService {
      * @return {@code null} if the signature verifies; otherwise a description
      *         of the verification failure.
      */
-    private String verifyXmlSignature(Document doc, X509Certificate userCert) {
+    static String verifyXmlSignature(Document doc, X509Certificate userCert) {
         try {
             NodeList nl = doc.getElementsByTagNameNS(XMLSignature.XMLNS, "Signature");
             if (nl.getLength() == 0) {
@@ -592,14 +595,12 @@ public class BankIdService {
      *         well-formed payload; &gt;1 indicates ambiguity the caller must
      *         reject).
      */
-    private int markBankIdSignedDataId(Document doc) {
+    static int markBankIdSignedDataId(Document doc) {
+        // getElementsByTagName returns only Element nodes.
         NodeList bankIdNodes = doc.getElementsByTagName("bankIdSignedData");
         int marked = 0;
         for (int i = 0; i < bankIdNodes.getLength(); i++) {
-            Node node = bankIdNodes.item(i);
-            if (!(node instanceof Element el)) {
-                continue;
-            }
+            Element el = (Element) bankIdNodes.item(i);
             for (String attrName : new String[] { "Id", "ID", "id" }) {
                 if (el.hasAttribute(attrName)) {
                     el.setIdAttribute(attrName, true);
@@ -615,7 +616,7 @@ public class BankIdService {
      * Extract X.509 certificates from {@code <X509Certificate>} elements inside
      * the signed XML. Order is preserved so that index 0 is the user cert.
      */
-    private List<X509Certificate> extractCertificates(Document doc) throws Exception {
+    static List<X509Certificate> extractCertificates(Document doc) throws Exception {
         List<X509Certificate> certs = new ArrayList<>();
         CertificateFactory cf = CertificateFactory.getInstance("X.509");
         NodeList certNodes = doc.getElementsByTagNameNS(XMLSignature.XMLNS, "X509Certificate");
@@ -647,11 +648,8 @@ public class BankIdService {
      * responder certificate, and that certificate must come from the path PKIX
      * actually validated — not from an unvalidated caller-supplied list.</p>
      */
-    private ChainCheck verifyCertificateChain(List<X509Certificate> certs, List<String> errors) {
-        if (certs.isEmpty()) {
-            errors.add("Empty certificate chain");
-            return ChainCheck.failed();
-        }
+    ChainCheck verifyCertificateChain(List<X509Certificate> certs, List<String> errors) {
+        // The only caller returns "No X509Certificate found" for an empty list.
         try {
             CertificateFactory cf = CertificateFactory.getInstance("X.509");
             // Anchor against the pinned roots, never against a certificate the
@@ -694,7 +692,7 @@ public class BankIdService {
      * not validate, so a caller that needs the issuing CA cannot accidentally
      * obtain it from an unvalidated chain.
      */
-    private record ChainCheck(boolean valid, List<X509Certificate> validatedPath) {
+    record ChainCheck(boolean valid, List<X509Certificate> validatedPath) {
 
         static ChainCheck failed() {
             return new ChainCheck(false, Collections.emptyList());
@@ -906,7 +904,7 @@ public class BankIdService {
         return el;
     }
 
-    private String firstElementText(Element scope, String tagName) {
+    static String firstElementText(Element scope, String tagName) {
         NodeList nl = scope.getElementsByTagName(tagName);
         if (nl.getLength() == 0) {
             return null;
@@ -920,22 +918,20 @@ public class BankIdService {
      * by searching for {@code parentTag} first, then within its descendants for
      * {@code childTag}.
      */
-    private String firstElementText(Element scope, String parentTag, String childTag) {
+    static String firstElementText(Element scope, String parentTag, String childTag) {
+        // getElementsByTagName returns only Element nodes.
         NodeList parents = scope.getElementsByTagName(parentTag);
         for (int i = 0; i < parents.getLength(); i++) {
-            Node parent = parents.item(i);
-            if (parent instanceof Element parentElement) {
-                NodeList children = parentElement.getElementsByTagName(childTag);
-                if (children.getLength() > 0) {
-                    String text = children.item(0).getTextContent();
-                    return text == null ? null : text.trim();
-                }
+            NodeList children = ((Element) parents.item(i)).getElementsByTagName(childTag);
+            if (children.getLength() > 0) {
+                String text = children.item(0).getTextContent();
+                return text == null ? null : text.trim();
             }
         }
         return null;
     }
 
-    private String decodeBase64Text(String b64) {
+    static String decodeBase64Text(String b64) {
         if (b64 == null) {
             return null;
         }
@@ -962,7 +958,7 @@ public class BankIdService {
      *         underlying Rdn yielded a {@code byte[]}), or {@code null} if
      *         the attribute is not present.
      */
-    private String extractDnField(String dn, String field) {
+    static String extractDnField(String dn, String field) {
         if (dn == null) {
             return null;
         }
@@ -970,17 +966,10 @@ public class BankIdService {
             LdapName name = new LdapName(dn);
             for (Rdn rdn : name.getRdns()) {
                 if (rdn.getType().equalsIgnoreCase(field)) {
+                    // A parsed Rdn's value is never null: a String, or a byte[]
+                    // for a #-hex (DER) value.
                     Object value = rdn.getValue();
-                    if (value == null) {
-                        return null;
-                    }
-                    if (value instanceof String s) {
-                        return s;
-                    }
-                    if (value instanceof byte[] bytes) {
-                        return decodeAnyStringBytes(bytes);
-                    }
-                    return value.toString();
+                    return value instanceof byte[] bytes ? decodeAnyStringBytes(bytes) : value.toString();
                 }
             }
             return null;
@@ -1002,7 +991,7 @@ public class BankIdService {
      * attribute types that Java's LDAP parser doesn't recognise as a native
      * string type, which is rare in BankID DNs.
      */
-    private String decodeAnyStringBytes(byte[] bytes) {
+    static String decodeAnyStringBytes(byte[] bytes) {
         if (bytes.length > 2) {
             return new String(bytes, 2, bytes.length - 2, StandardCharsets.UTF_8);
         }
