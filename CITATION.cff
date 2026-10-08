@@ -20,12 +20,20 @@ abstract: >-
   explicitly enabled, makes gatekeeper responses deserialisable by the
   HTTP client, registers every configured gatekeeper certificate, and
   sends the configured country code, for deployment together with
-  gatekeeper 1.5.0 and railgate 1.5.0.
+  gatekeeper 1.5.0 and railgate 1.5.0. Version 1.6.0 adds Marvell
+  LiquidSecurity, Thales Luna, Crypto4A, Fortanix and Entrust nShield as
+  verified vendors (nine in all), binds the BankID mandate and the caller's
+  transport certificate to the request, limits the age and reuse of BankID
+  signatures, verifies the gatekeeper's signed confirm response and checks
+  each receipt against what was sent, sends the customer and the technical
+  supplier to the gatekeeper (receipt form v3, in lockstep with gatekeeper
+  1.6.0), adds a key and CSR signature-algorithm policy and a request size
+  limit, and detects every PIT mutant of its production code.
   Companions: gatekeeper (NCA-operated certificate-issuance gate and
   settlement-time signature verification) and railgate (central-bank
   settlement-rail enforcement).
-version: "1.5.0"
-date-released: "2026-09-30"
+version: "1.6.0"
+date-released: "2026-10-08"
 license: MIT
 repository-code: "https://github.com/niklasgillstrom/hsm"
 authors:

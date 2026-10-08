@@ -24,7 +24,7 @@ public class FailClosedSignatoryRightsVerifier implements SignatoryRightsVerifie
 
     public FailClosedSignatoryRightsVerifier() {
         log.warn("FailClosedSignatoryRightsVerifier is active: every signatory-rights query will return UNKNOWN. "
-                + "This is the REFERENCE default and ALL signing-certificate requests will fail signatory "
+                + "This is the REFERENCE default and ALL certificate requests (SIGNING and TRANSPORT) will fail signatory "
                 + "authorisation. Wire up a real implementation (swish.signatory-rights.mode=mock-registry "
                 + "for demonstration, or supply a Bolagsverket/Swish-agreement-registry adapter) before "
                 + "production deployment.");

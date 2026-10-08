@@ -1,6 +1,7 @@
 package eu.gillstrom.hsm.service;
 
 import eu.gillstrom.hsm.testsupport.BankIdFixture;
+import java.util.Date;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,6 +41,58 @@ class BankIdSignatureVerificationTest {
         assertThat(r.isValid()).as("verification error: %s", r.getError()).isTrue();
         assertThat(r.getPersonalNumber()).isEqualTo(BankIdFixture.TEST_PERSONAL_NUMBER);
         assertThat(r.getUsrVisibleData()).isEqualTo("Jag godkanner avtalet");
+    }
+
+    @Test
+    @DisplayName("The result reports what was verified: signer, relying party, signing time, chain")
+    void theResultReportsWhatWasVerified() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        java.util.Date producedAt = new java.util.Date((System.currentTimeMillis() / 1000 - 60) * 1000);
+
+        BankIdService.BankIdResult r = service.verify(sig, fx.ocspProducedAt(sig, producedAt));
+
+        assertThat(r.isValid()).as("verification error: %s", r.getError()).isTrue();
+        assertThat(r.isSignatureValid()).isTrue();
+        assertThat(r.getError()).isNull();
+        assertThat(r.getName()).isEqualTo(BankIdFixture.TEST_NAME);
+        assertThat(r.getRelyingPartyName()).isEqualTo("Testbolaget");
+        assertThat(r.getRelyingPartyOrgNumber()).isEqualTo("5566778899");
+        assertThat(r.getSignatureTime()).isEqualTo(producedAt.toInstant());
+        assertThat(r.isCertificateChainValid()).isTrue();
+        assertThat(r.getCertificateChainErrors()).isEmpty();
+        assertThat(r.getCertificateCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("A response signed by an expired responder certificate is rejected")
+    void expiredResponderIsRejected() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        BankIdService.BankIdResult r = service.verify(sig, fx.ocspExpiredResponder(sig));
+
+        assertThat(r.isValid()).isFalse();
+        assertThat(r.getError()).startsWith("OCSP verification failed");
+    }
+
+    @Test
+    @DisplayName("A response whose nextUpdate has passed is stale")
+    void pastNextUpdateIsStale() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        BankIdService.BankIdResult r = service.verify(sig,
+                fx.ocspNextUpdate(sig, new java.util.Date(System.currentTimeMillis() - 60_000L)));
+
+        assertThat(r.isValid()).isFalse();
+        assertThat(r.getError()).contains("stale");
+        assertThat(service.verify(sig,
+                fx.ocspNextUpdate(sig, new java.util.Date(System.currentTimeMillis() + 60_000L))).isValid()).isTrue();
+    }
+
+    @Test
+    @DisplayName("A nonce that is exactly the SHA-1 of the signature binds")
+    void exactLengthNonceBinds() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        BankIdService.BankIdResult r = service.verify(sig, fx.ocspExactNonce(sig));
+
+        assertThat(r.isValid()).as("verification error: %s", r.getError()).isTrue();
     }
 
     @Test
@@ -128,44 +181,85 @@ class BankIdSignatureVerificationTest {
     }
 
     @Test
-    @DisplayName("usrNonVisibleData carrying the canonical binding matches the expected string")
-    void canonicalBindingIsCarriedInSignedPayload() throws Exception {
-        byte[] csrDer = "pretend-this-is-a-csr".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        String binding = BankIdService.expectedBinding("5569743098", "1231015932", csrDer);
-        String sig = fx.signedResponseBoundTo("Jag godkanner avtalet", binding);
+    @DisplayName("A signed payload altered after signing is rejected")
+    void payloadAlteredAfterSigningIsRejected() throws Exception {
+        String mandate = new BankIdService.Mandate("5569743098", "1231015932", 1).canonical();
+        String sig = fx.signedResponseBoundTo("Jag godkanner (1) certifikat", mandate);
+        String xml = new String(java.util.Base64.getDecoder().decode(sig), java.nio.charset.StandardCharsets.UTF_8);
+        java.util.function.Function<String, String> b64 = s -> java.util.Base64.getEncoder()
+                .encodeToString(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        // The signatory approved one certificate; the payload now claims 99.
+        String raisedCount = xml.replace(b64.apply(mandate),
+                b64.apply(new BankIdService.Mandate("5569743098", "1231015932", 99).canonical()));
+        assertThat(raisedCount).isNotEqualTo(xml);
+        String forged = java.util.Base64.getEncoder()
+                .encodeToString(raisedCount.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        assertThat(service.verify(sig, fx.ocspResponseBase64(sig)).isValid()).isTrue();
+        BankIdService.BankIdResult r = service.verify(forged, fx.ocspResponseBase64(forged));
+
+        assertThat(r.isValid()).isFalse();
+        assertThat(r.getError()).contains("XML-DSig");
+        assertThat(r.isSignatureValid()).isFalse();
+        assertThat(r.isCertificateChainValid()).as("the chain itself is the genuine one").isTrue();
+    }
+
+    @Test
+    @DisplayName("The mandate in usrNonVisibleData is read from the signed payload")
+    void mandateIsCarriedInSignedPayload() throws Exception {
+        String mandate = new BankIdService.Mandate("5569743098", "1231015932", 4).canonical();
+        assertThat(mandate).isEqualTo("hsm-mandate:v1;org=5569743098;swish=1231015932;count=4");
+        String sig = fx.signedResponseBoundTo("Jag godkanner avtalet", mandate);
 
         BankIdService.BankIdResult r = service.verify(sig, fx.ocspResponseBase64(sig));
 
         assertThat(r.isValid()).as("verification error: %s", r.getError()).isTrue();
-        assertThat(r.getUsrNonVisibleData()).isEqualTo(binding);
-        assertThat(BankIdService.isBoundToRequest(r.getUsrNonVisibleData(), binding)).isTrue();
+        assertThat(BankIdService.parseMandate(r.getUsrNonVisibleData()))
+                .contains(new BankIdService.Mandate("5569743098", "1231015932", 4));
     }
 
     @Test
-    @DisplayName("A signature bound to a different CSR does not satisfy the binding")
-    void bindingForAnotherCsrIsRejected() throws Exception {
-        byte[] csrA = "csr-A".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        byte[] csrB = "csr-B".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        String bindingA = BankIdService.expectedBinding("5569743098", "1231015932", csrA);
-        String bindingB = BankIdService.expectedBinding("5569743098", "1231015932", csrB);
-
-        // A genuine, valid BankID signature — collected for request A.
-        String sig = fx.signedResponseBoundTo("Jag godkanner avtalet", bindingA);
-        BankIdService.BankIdResult r = service.verify(sig, fx.ocspResponseBase64(sig));
-
-        assertThat(r.isValid()).as("the signature itself is genuine").isTrue();
-        assertThat(BankIdService.isBoundToRequest(r.getUsrNonVisibleData(), bindingB))
-                .as("replaying it against request B must not satisfy the binding")
-                .isFalse();
+    @DisplayName("Anything but the exact mandate format is no mandate")
+    void malformedMandatesAreRejected() {
+        String org = "5569743098";
+        String swish = "1231015932";
+        assertThat(BankIdService.parseMandate(null)).isEmpty();
+        assertThat(BankIdService.parseMandate("   ")).isEmpty();
+        for (String bad : new String[] {
+                // The earlier, CSR-bound versions.
+                "hsm-csr:v2;org=" + org + ";swish=" + swish + ";type=SIGNING;csr-sha256=00",
+                "hsm-csr:v1;org=" + org + ";swish=" + swish + ";csr-sha256=00",
+                // Count outside 1..99, or not a plain number.
+                "hsm-mandate:v1;org=" + org + ";swish=" + swish + ";count=0",
+                "hsm-mandate:v1;org=" + org + ";swish=" + swish + ";count=100",
+                "hsm-mandate:v1;org=" + org + ";swish=" + swish + ";count=04",
+                "hsm-mandate:v1;org=" + org + ";swish=" + swish + ";count=-1",
+                "hsm-mandate:v1;org=" + org + ";swish=" + swish + ";count=",
+                // Padding, missing or reordered fields, malformed numbers.
+                " hsm-mandate:v1;org=" + org + ";swish=" + swish + ";count=4",
+                "hsm-mandate:v1;org=" + org + ";swish=" + swish + ";count=4\n",
+                "hsm-mandate:v1;org=" + org + ";swish=" + swish + ";count=4;",
+                "hsm-mandate:v1;swish=" + swish + ";org=" + org + ";count=4",
+                "hsm-mandate:v1;org=" + org + ";count=4",
+                "hsm-mandate:v1;org=556974-3098;swish=" + swish + ";count=4",
+                "hsm-mandate:v1;org=55697430981;swish=" + swish + ";count=4",
+                "hsm-mandate:v1;org=" + org + ";swish=123101593;count=4",
+                "hsm-mandate:v2;org=" + org + ";swish=" + swish + ";count=4"}) {
+            assertThat(BankIdService.parseMandate(bad)).as(bad).isEmpty();
+        }
+        assertThat(BankIdService.parseMandate("hsm-mandate:v1;org=16" + org + ";swish=" + swish + ";count=99"))
+                .contains(new BankIdService.Mandate("16" + org, swish, 99));
+        assertThat(BankIdService.parseMandate("hsm-mandate:v1;org=" + org + ";swish=" + swish + ";count=1"))
+                .contains(new BankIdService.Mandate(org, swish, 1));
     }
 
     @Test
-    @DisplayName("Missing usrNonVisibleData never satisfies the binding")
-    void absentBindingIsRejected() {
-        String binding = BankIdService.expectedBinding("5569743098", "1231015932", new byte[] { 1 });
-
-        assertThat(BankIdService.isBoundToRequest(null, binding)).isFalse();
-        assertThat(BankIdService.isBoundToRequest("   ", binding)).isFalse();
+    @DisplayName("A mandate covers only its own organisation and Swish number")
+    void mandateCoversItsOwnNumbersOnly() {
+        BankIdService.Mandate m = new BankIdService.Mandate("5569743098", "1231015932", 4);
+        assertThat(m.covers("5569743098", "1231015932")).isTrue();
+        assertThat(m.covers("5569743099", "1231015932")).isFalse();
+        assertThat(m.covers("5569743098", "1231015933")).isFalse();
     }
 
     @Test
@@ -188,6 +282,7 @@ class BankIdSignatureVerificationTest {
         BankIdService.BankIdResult r = service.verify(sig, fx.ocspResponseBase64(sig));
 
         assertThat(r.isValid()).isFalse();
+        assertThat(r.getError()).isEqualTo("Missing or ambiguous bankIdSignedData element");
     }
 
     @Test
@@ -200,6 +295,9 @@ class BankIdSignatureVerificationTest {
         BankIdService.BankIdResult r = other.verify(sig, fx.ocspResponseBase64(sig));
 
         assertThat(r.isValid()).isFalse();
+        // Without a validated path the issuing CA is unknown, so the OCSP
+        // responder cannot be checked against it: the refusal comes from there.
+        assertThat(r.getError()).startsWith("OCSP verification failed");
     }
 
     @Test
@@ -237,5 +335,135 @@ class BankIdSignatureVerificationTest {
                 .hasSize(2)
                 .anyMatch(a -> a.getTrustedCert().getSubjectX500Principal().getName()
                         .contains("Test BankID Root CA v1 Test"));
+    }
+
+    // ------------------------------------------------------------------
+    // Freshness, issuer match and single use
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("An OCSP response older than the maximum signature age is rejected")
+    void staleProducedAtIsRejected() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        Date sixteenMinutesAgo = new Date(System.currentTimeMillis() - 16 * 60_000L);
+        BankIdService.BankIdResult r = service.verify(sig, fx.ocspProducedAt(sig, sixteenMinutesAgo));
+
+        assertThat(r.isValid()).isFalse();
+        assertThat(r.getError()).contains("BANKID_SIGNATURE_TOO_OLD");
+
+        Date fourteenMinutesAgo = new Date(System.currentTimeMillis() - 14 * 60_000L);
+        assertThat(service.verify(sig, fx.ocspProducedAt(sig, fourteenMinutesAgo)).isValid()).isTrue();
+    }
+
+    @Test
+    @DisplayName("The maximum signature age is configurable")
+    void maximumAgeIsConfigurable() throws Exception {
+        BankIdService strict = new BankIdService(fx.anchors(), java.time.Clock.systemUTC(),
+                java.time.Duration.ofMinutes(1));
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        Date twoMinutesAgo = new Date(System.currentTimeMillis() - 2 * 60_000L);
+        assertThat(strict.verify(sig, fx.ocspProducedAt(sig, twoMinutesAgo)).getError())
+                .contains("BANKID_SIGNATURE_TOO_OLD");
+    }
+
+    @Test
+    @DisplayName("A non-positive maximum age is refused at construction")
+    void nonPositiveMaximumAgeIsRefused() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new BankIdService(fx.anchors(),
+                java.time.Clock.systemUTC(), java.time.Duration.ZERO)).isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new BankIdService(fx.anchors(),
+                java.time.Clock.systemUTC(), java.time.Duration.ofMinutes(-1))).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("An OCSP response from the future, beyond the clock skew, is rejected")
+    void futureProducedAtOrThisUpdateIsRejected() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        Date sixMinutesAhead = new Date(System.currentTimeMillis() + 6 * 60_000L);
+        assertThat(service.verify(sig, fx.ocspProducedAt(sig, sixMinutesAhead)).getError())
+                .contains("producedAt is in the future");
+        assertThat(service.verify(sig, fx.ocspThisUpdate(sig, sixMinutesAhead)).getError())
+                .contains("thisUpdate is in the future");
+
+        Date fourMinutesAhead = new Date(System.currentTimeMillis() + 4 * 60_000L);
+        assertThat(service.verify(sig, fx.ocspProducedAt(sig, fourMinutesAhead)).isValid()).isTrue();
+        assertThat(service.verify(sig, fx.ocspThisUpdate(sig, fourMinutesAhead)).isValid()).isTrue();
+    }
+
+    @Test
+    @DisplayName("An OCSP entry for the same serial under another issuer is not this certificate's")
+    void sameSerialOtherIssuerIsRejected() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        BankIdService.BankIdResult r = service.verify(sig, fx.ocspSameSerialOtherIssuer(sig));
+
+        assertThat(r.isValid()).isFalse();
+        assertThat(r.getError()).contains("no entry for certificate serial");
+    }
+
+    @Test
+    @DisplayName("A BankID signature can be consumed as many times as its mandate states")
+    void aSignatureIsConsumedCountTimes() throws Exception {
+        String sig = fx.signedResponseBase64("Jag godkanner avtalet");
+        BankIdService.BankIdResult r = service.verify(sig, fx.ocspResponseBase64(sig));
+
+        for (int i = 0; i < 4; i++) {
+            assertThat(service.consume(sig, r.getSignatureTime(), 4)).as("issuance %d of 4", i + 1).isTrue();
+        }
+        assertThat(service.consume(sig, r.getSignatureTime(), 4)).as("a fifth").isFalse();
+        assertThat(service.consume(sig, r.getSignatureTime(), 4)).isFalse();
+        String other = fx.signedResponseBase64("Annan text");
+        assertThat(service.consume(other, r.getSignatureTime(), 1)).isTrue();
+        assertThat(service.consume(other, r.getSignatureTime(), 1)).isFalse();
+        assertThat(service.consume("no mandate", r.getSignatureTime(), 0)).isFalse();
+    }
+
+    @Test
+    @DisplayName("Concurrent issuances under one signature never exceed its count")
+    void consumptionIsAtomic() throws Exception {
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(16);
+        try {
+            java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+            java.util.List<java.util.concurrent.Future<Boolean>> results = new java.util.ArrayList<>();
+            java.time.Instant producedAt = java.time.Instant.now();
+            for (int i = 0; i < 200; i++) {
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return service.consume("shared", producedAt, 4);
+                }));
+            }
+            start.countDown();
+            int granted = 0;
+            for (java.util.concurrent.Future<Boolean> f : results) {
+                granted += f.get() ? 1 : 0;
+            }
+            assertThat(granted).isEqualTo(4);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("A consumed signature is forgotten once it is too old to verify anyway")
+    void consumedSignaturesExpire() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<java.time.Instant> now =
+                new java.util.concurrent.atomic.AtomicReference<>(java.time.Instant.now());
+        java.time.Clock clock = new java.time.Clock() {
+            public java.time.ZoneId getZone() { return java.time.ZoneOffset.UTC; }
+            public java.time.Clock withZone(java.time.ZoneId zone) { return this; }
+            public java.time.Instant instant() { return now.get(); }
+        };
+        BankIdService timed = new BankIdService(fx.anchors(), clock, java.time.Duration.ofMinutes(15));
+        java.time.Instant producedAt = now.get();
+        assertThat(timed.consume("sig-a", producedAt, 2)).isTrue();
+        assertThat(timed.usedSignatureCount()).isEqualTo(1);
+
+        now.set(producedAt.plus(java.time.Duration.ofMinutes(19)));
+        assertThat(timed.consume("sig-a", producedAt, 2)).as("second, still within age plus skew").isTrue();
+        assertThat(timed.consume("sig-a", producedAt, 2)).as("third").isFalse();
+
+        now.set(producedAt.plus(java.time.Duration.ofMinutes(20)).plusSeconds(1));
+        assertThat(timed.consume("sig-b", now.get(), 1)).isTrue();
+        assertThat(timed.usedSignatureCount()).as("sig-a is past its window and dropped").isEqualTo(1);
+        assertThat(timed.consume("sig-b", now.get(), 1)).isFalse();
     }
 }

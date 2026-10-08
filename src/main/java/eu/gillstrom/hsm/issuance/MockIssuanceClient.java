@@ -10,8 +10,6 @@ import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
-import org.bouncycastle.pkcs.PKCS10CertificationRequest;
-import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -185,13 +183,7 @@ public class MockIssuanceClient implements IssuanceClient {
     }
 
     private static PublicKey parseCsrPublicKey(String pem) throws Exception {
-        String body = pem
-                .replace("-----BEGIN CERTIFICATE REQUEST-----", "")
-                .replace("-----END CERTIFICATE REQUEST-----", "")
-                .replaceAll("\\s+", "");
-        byte[] der = Base64.getDecoder().decode(body);
-        PKCS10CertificationRequest csr = new PKCS10CertificationRequest(der);
-        return new JcaPKCS10CertificationRequest(csr).getPublicKey();
+        return eu.gillstrom.hsm.util.Csrs.publicKey(pem);
     }
 
     private static String toPem(X509Certificate cert) throws Exception {

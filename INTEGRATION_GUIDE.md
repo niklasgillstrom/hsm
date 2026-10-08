@@ -15,16 +15,16 @@ The audience is a **systems / integration engineer** at the FE who has been aske
 | Component | Role | Production-trustable as-is? |
 | --- | --- | --- |
 | `verification/SecurosysVerifier`, `verification/YubicoVerifier` | Vendor-specific HSM attestation verifiers; pin real vendor roots; PKIX-validated chain + signature + non-extractability check | Yes |
-| `verification/AzureHsmVerifier`, `verification/GoogleCloudHsmVerifier` | Cloud-HSM verifiers; pin Marvell LiquidSecurity root | **No** for Azure: every Azure attestation fails with `AZURE_ATTRIBUTES_UNVERIFIED`, because no parser for the Marvell attribute encoding ships. Google: manufacturer chain only, and the gatekeeper (1.5.0) never returns COMPLIANT for it (`GOOGLE_KEY_ORIGIN_UNVERIFIED`). For both, the cert expired 2025-11-16 — rotate before relying on post-expiry attestations; dual-chain owner-root validation not implemented (see verifier SECURITY NOTE) |
+| `verification/AzureHsmVerifier`, `verification/GoogleCloudHsmVerifier`, `verification/MarvellAttestation`, `verification/MarvellHsmVerifier` | Marvell-based verifiers (Azure, Google, physical Marvell); Marvell roots from Microsoft's validator, Google owner root | **No**: never valid until a real Azure / Google / Marvell attestation confirms the Marvell format (`MARVELL_FORMAT_UNCONFIRMED`) |
 | `gatekeeper/GatekeeperClient` (interface) + `HttpGatekeeperClient` | The FE → NCA verify/confirm RPC, two-step protocol | Yes — `mode=http` against the NCA's published gatekeeper URL |
-| `gatekeeper/ReceiptVerifier`, `gatekeeper/ReceiptCanonicalizer` | Validates the gatekeeper-signed receipt against the canonical bytes the FE submitted | Yes |
+| `gatekeeper/ReceiptVerifier`, `gatekeeper/ReceiptCanonicalizer` | Validates the gatekeeper's signature over the canonical form of the receipt, under a trusted gatekeeper key | Yes |
 | `gatekeeper/GatekeeperKeyRegistry` | Trusted set of gatekeeper signing certificates | Yes — populate via `swish.gatekeeper.trusted-keys` |
 | `service/AttestationService`, `controller/AttestationController` | End-to-end FE-side endpoint that takes CSR + attestation + BankID-signed mandate from a TL, runs the four-phase pipeline, returns issued cert | Reference flow only — adapt the wiring into the FE's own controller layer |
 | `issuance/IssuanceClient` (interface) + `MockIssuanceClient` | Mock CA that signs the CSR locally for the reference flow | **No** — replace with the FE's real CA integration |
-| `service/SignatoryRightsVerifier` (interface) + `FailClosedSignatoryRightsVerifier` + `MockAgreementRegistrySignatoryRightsVerifier` | Validates that the BankID-signed mandate authorises the requesting TL | **No** for production — write a custom adapter against the FE's actual signatory-rights database |
+| `service/SignatoryRightsVerifier` (interface) + `FailClosedSignatoryRightsVerifier` + `MockAgreementRegistrySignatoryRightsVerifier` | Checks that the person who signed with BankID is an authorised signatory for the organisation and Swish number | **No** for production — write a custom adapter against the FE's actual signatory-rights database |
 | `service/BankIdService` | BankID signature verification (operational precondition for issuance) | Reference structure — adapt to the FE's actual BankID provider integration |
 
-The four vendor verifiers, the gatekeeper-client + receipt-validation layer, and the verification-pipeline orchestration in `AttestationService` are usable directly. The CA, signatory-rights and BankID integrations are FE-specific and require adapter work.
+The nine vendor verifiers, the gatekeeper-client + receipt-validation layer, and the verification-pipeline orchestration in `AttestationService` are usable directly. The CA, signatory-rights and BankID integrations are FE-specific and require adapter work.
 
 ---
 
@@ -58,6 +58,7 @@ Phase 4 — gatekeeper.confirm
 In an FE that has an existing CSR-issuance pipeline, the integration points are:
 
 - **Before** the FE's CA signs anything: insert Phase 1 (local verification) + Phase 2 (`gatekeeper.verify`). If either fails, abort issuance with a 4xx to the TL — the FE has not satisfied its Article 6(10) duty and a sanction-bearing breach would result if it proceeded.
+  The reference `AttestationController` answers 200 for every stage and reports the outcome in the body (`stage`, `errors`); the status codes in this guide are for the FE's own pipeline, which maps the stages to them.
 - **After** the FE's CA returns a signed cert but before the cert is delivered to the TL: insert Phase 4 (`gatekeeper.confirm`). If `confirm` fails (e.g., gatekeeper rejects on public-key mismatch or registry anomaly), the FE must NOT deliver the cert; revoke it immediately.
 
 The reference flow in `AttestationService.verifyAndIssue(...)` shows the orchestration in one place. The FE's production code can follow the same sequence or split it across services, as long as the four phases happen in order and the second/fourth complete before any production-trust signal (cert delivery to TL, registration in payment infrastructure, etc.) is emitted.
@@ -111,9 +112,10 @@ Replace `MockIssuanceClient` with an `IssuanceClient` implementation that takes 
 | `SWISH_GATEKEEPER_TIMEOUT_MS` | RPC timeout | `5000` (or higher for cross-border traffic) |
 | `SWISH_GATEKEEPER_TRUSTED_KEYS` | Newline- or comma-separated PEMs of NCA gatekeeper signing certs that this FE accepts | The NCA's published certificate from `GET /v1/gatekeeper/keys` |
 | `SWISH_SIGNATORY_RIGHTS_MODE` | Signatory-rights adapter | The FE's custom adapter name; **must not stay at `fail-closed`** in production |
+| `SWISH_CALLER_BINDING` | Bind the caller's transport certificate to the request (`CallerPolicy`) | `required` (the default), with `SERVER_SSL_CLIENT_AUTH=need` and the Swish CA in `server.ssl.trust-store` |
 | `SWISH_ISSUANCE_MODE` | CA backend | The FE's custom integration; **must not stay at `mock`** in production |
 
-The mTLS client certificate the FE presents to the gatekeeper is configured at the HTTP-client level — the FE provides the keystore via the standard JVM TLS configuration (`-Djavax.net.ssl.keyStore=...`) or a Spring `RestClient` customizer.
+The mTLS client certificate the FE presents to the gatekeeper, and the trust store for the gatekeeper's certificate, come from a Spring Boot SSL bundle named by `swish.gatekeeper.ssl-bundle` (`spring.ssl.bundle.jks.<name>.keystore.*` / `.truststore.*`, or the `pem` equivalents). When the property is empty the JVM defaults apply (`-Djavax.net.ssl.keyStore=...`). `swish.gatekeeper.url` must be `https://`. If the gatekeeper signs receipts with anything other than SHA256withRSA, set `swish.gatekeeper.signature-algorithm` to the same algorithm.
 
 ---
 
@@ -135,7 +137,7 @@ The FE's own audit record must cover what the gatekeeper's audit log does **not*
 
 Periodic data triangulation by the supervisor (described in the gatekeeper repo's `SUPERVISORY_OPERATIONS.md` §3.5) cross-references the FE's issuance record (this repository's audit data, not the gatekeeper's) with the gatekeeper's audit log and the issuing CA's CRL/OCSP. An issued cert without a matching `verificationId`+receipt in the FE's own record is a self-flagged Article 6(10) breach.
 
-The FE retains these records under the FE's own retention infrastructure — separate from the gatekeeper's. There is no shared-storage assumption.
+The FE retains these records under the FE's own retention infrastructure — separate from the gatekeeper's. There is no shared-storage assumption. From gatekeeper 1.6.0 the gatekeeper also keeps the submitted verification request, attestation evidence included, so the supervisor no longer depends on the FE's copy; the FE's own obligation is unchanged.
 
 ---
 
@@ -158,7 +160,7 @@ If the FE's CA signs the CSR but then `gatekeeper.confirm` fails (e.g., public-k
 
 ### 6.3 Receipt validation
 
-Every receipt the FE receives from the gatekeeper must be validated against the trusted gatekeeper certificates in `swish.gatekeeper.trusted-keys` before being relied on. `ReceiptVerifier.verify(receipt)` does this — it (i) re-canonicalises the receipt body, (ii) verifies the gatekeeper signature against each trusted cert, (iii) returns the validated receipt for storage. If validation fails, treat as if the gatekeeper had returned an error — do NOT proceed with issuance.
+Every receipt the FE receives from the gatekeeper must be validated against the trusted gatekeeper certificates in `swish.gatekeeper.trusted-keys` before being relied on. `ReceiptVerifier.verify(receipt)` does this and returns true or false: it (i) parses the signing certificate the receipt carries, (ii) requires that certificate's public key to be one of the trusted keys, and (iii) verifies the signature over the receipt's canonical bytes under that trusted key with `swish.gatekeeper.signature-algorithm`. `AttestationService` then requires the receipt to approve the CSR's key and to belong to this request: issued within 5 minutes, with the country, supplier, key purpose and HSM vendor the request sent and the key properties of a compliant key. If any of this fails, treat it as if the gatekeeper had returned an error — do NOT proceed with issuance.
 
 The FE's trusted-keys list is updated whenever the NCA rotates its receipt-signing key. The NCA publishes both active and retired keys via `GET /v1/gatekeeper/keys`; the FE polls or watches this endpoint and refreshes `swish.gatekeeper.trusted-keys`. Receipts signed under retired keys remain verifiable for the 5-year retention horizon — the registry includes retired keys for that reason.
 
@@ -184,6 +186,7 @@ Before the FE's first production traffic:
 - [ ] `swish.gatekeeper.mode=http` and `swish.gatekeeper.url` points at the NCA's gatekeeper deployment
 - [ ] `swish.gatekeeper.trusted-keys` is populated from the NCA's `GET /v1/gatekeeper/keys` and a refresh job is scheduled (weekly or per NCA policy)
 - [ ] mTLS client certificate is provisioned and presented by the FE's HTTP client to the gatekeeper
+- [ ] The API listens with mTLS (`server.ssl.client-auth=need`, Swish CA in the trust store) and `swish.caller-binding` is `required`
 - [ ] `swish.signatory-rights.mode` is set to the FE's custom adapter (NOT `fail-closed`, NOT `mock-registry`)
 - [ ] `swish.issuance.mode` is set to the FE's custom CA integration (NOT `mock`)
 - [ ] BankID integration is connected to the FE's contracted BankID provider

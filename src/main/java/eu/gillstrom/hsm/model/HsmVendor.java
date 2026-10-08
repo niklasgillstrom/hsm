@@ -4,7 +4,12 @@ public enum HsmVendor {
     YUBICO("Yubico", "YubiHSM 2"),
     SECUROSYS("Securosys", "Primus HSM"),
     AZURE("Microsoft", "Azure Key Vault HSM"),
-    GOOGLE("Google Cloud", "Cloud HSM");
+    GOOGLE("Google Cloud", "Cloud HSM"),
+    MARVELL("Marvell", "LiquidSecurity HSM"),
+    THALES("Thales", "Luna HSM"),
+    CRYPTO4A("Crypto4A", "QASM"),
+    FORTANIX("Fortanix", "DSM"),
+    ENTRUST("Entrust", "nShield");
     
     private final String vendorName;
     private final String productName;

@@ -58,6 +58,22 @@ public final class TestPki {
         return new JcaX509CertificateConverter().getCertificate(b.build(cs));
     }
 
+    /** A self-signed certificate with the given subject, e.g. a Swish transport certificate's. */
+    public static X509Certificate withSubject(X500Name subject) throws Exception {
+        KeyPair kp = newRsaKeyPair(2048);
+        long now = System.currentTimeMillis();
+        X509v3CertificateBuilder b = new JcaX509v3CertificateBuilder(
+                subject, nextSerial(), new Date(now - 60_000L), new Date(now + 3600_000L),
+                subject, kp.getPublic());
+        ContentSigner cs = new JcaContentSignerBuilder("SHA256withRSA").build(kp.getPrivate());
+        return new JcaX509CertificateConverter().getCertificate(b.build(cs));
+    }
+
+    /** A self-signed certificate with the given subject DN string. */
+    public static X509Certificate withSubject(String subject) throws Exception {
+        return withSubject(new X500Name(subject));
+    }
+
     /** Issue a subordinate CA certificate under the given issuer. */
     public static X509Certificate subordinateCa(
             KeyPair subjectKp, String subjectCn,
@@ -115,10 +131,16 @@ public final class TestPki {
     public static X509Certificate ocspResponder(
             KeyPair subjectKp, String subjectCn,
             X500Name issuerDn, PrivateKey signingKey) throws Exception {
-        X500Name subject = new X500Name("CN=" + subjectCn);
         long now = System.currentTimeMillis();
-        Date notBefore = new Date(now - 60_000L);
-        Date notAfter = new Date(now + 3600_000L);
+        return ocspResponder(subjectKp, subjectCn, issuerDn, signingKey,
+                new Date(now - 60_000L), new Date(now + 3600_000L));
+    }
+
+    /** As above, valid from {@code notBefore} to {@code notAfter}. */
+    public static X509Certificate ocspResponder(
+            KeyPair subjectKp, String subjectCn,
+            X500Name issuerDn, PrivateKey signingKey, Date notBefore, Date notAfter) throws Exception {
+        X500Name subject = new X500Name("CN=" + subjectCn);
         X509v3CertificateBuilder b = new JcaX509v3CertificateBuilder(
                 issuerDn, nextSerial(), notBefore, notAfter, subject, subjectKp.getPublic());
         b.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
@@ -137,9 +159,15 @@ public final class TestPki {
      */
     public static String csrPem(KeyPair subjectKp, String subjectCn, PrivateKey signingKey)
             throws Exception {
+        return csrPem(subjectKp, subjectCn, signingKey, "SHA256withRSA");
+    }
+
+    /** As {@link #csrPem(KeyPair, String, PrivateKey)}, signed with {@code signatureAlgorithm}. */
+    public static String csrPem(KeyPair subjectKp, String subjectCn, PrivateKey signingKey,
+            String signatureAlgorithm) throws Exception {
         JcaPKCS10CertificationRequestBuilder b = new JcaPKCS10CertificationRequestBuilder(
                 new X500Name("CN=" + subjectCn), subjectKp.getPublic());
-        ContentSigner cs = new JcaContentSignerBuilder("SHA256withRSA").build(signingKey);
+        ContentSigner cs = new JcaContentSignerBuilder(signatureAlgorithm).build(signingKey);
         PKCS10CertificationRequest csr = b.build(cs);
         String b64 = Base64.getMimeEncoder(64, "\n".getBytes()).encodeToString(csr.getEncoded());
         return "-----BEGIN CERTIFICATE REQUEST-----\n" + b64

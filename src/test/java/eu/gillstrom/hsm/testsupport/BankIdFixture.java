@@ -107,8 +107,16 @@ public final class BankIdFixture {
     /** A responder issued by the right CA but without EKU id-kp-OCSPSigning. */
     public final KeyPair noEkuOcspKp;
     public final X509Certificate noEkuOcspCert;
+    /** A responder issued by the bank CA whose certificate has expired. */
+    public final KeyPair expiredOcspKp;
+    public final X509Certificate expiredOcspCert;
 
     public BankIdFixture() throws Exception {
+        this("CN=" + TEST_NAME + ",SERIALNUMBER=" + TEST_PERSONAL_NUMBER + ",C=SE");
+    }
+
+    /** @param personSubject the subject DN of the signatory's certificate */
+    public BankIdFixture(String personSubject) throws Exception {
         rootKp = TestPki.newRsaKeyPair(2048);
         rootCert = TestPki.selfSignedCa(rootKp, "Test BankID Fixture Root");
 
@@ -117,7 +125,7 @@ public final class BankIdFixture {
                 rootCert, rootKp.getPrivate());
 
         personKp = TestPki.newRsaKeyPair(2048);
-        personCert = person(personKp, bankCaCert, bankCaKp.getPrivate());
+        personCert = person(personKp, personSubject, bankCaCert, bankCaKp.getPrivate());
 
         ocspKp = TestPki.newRsaKeyPair(2048);
         ocspCert = TestPki.ocspResponder(ocspKp, "Test Bank CA v1 for BankID OCSP Signing",
@@ -139,6 +147,12 @@ public final class BankIdFixture {
         noEkuOcspKp = TestPki.newRsaKeyPair(2048);
         noEkuOcspCert = TestPki.endEntity(noEkuOcspKp, "Test Bank CA v1 for BankID No EKU",
                 bankCaCert, bankCaKp.getPrivate());
+
+        expiredOcspKp = TestPki.newRsaKeyPair(2048);
+        long now = System.currentTimeMillis();
+        expiredOcspCert = TestPki.ocspResponder(expiredOcspKp, "Test Bank CA v1 for BankID OCSP Signing",
+                new X500Name(bankCaCert.getSubjectX500Principal().getName()), bankCaKp.getPrivate(),
+                new Date(now - 7_200_000L), new Date(now - 3_600_000L));
     }
 
     /** The anchor set to hand to the package-private BankIdService constructor. */
@@ -146,10 +160,9 @@ public final class BankIdFixture {
         return Collections.singleton(new java.security.cert.TrustAnchor(rootCert, null));
     }
 
-    private static X509Certificate person(KeyPair kp, X509Certificate issuer, PrivateKey issuerKey)
-            throws Exception {
-        X500Name subject = new X500Name(
-                "CN=" + TEST_NAME + ",SERIALNUMBER=" + TEST_PERSONAL_NUMBER + ",C=SE");
+    private static X509Certificate person(KeyPair kp, String personSubject, X509Certificate issuer,
+            PrivateKey issuerKey) throws Exception {
+        X500Name subject = new X500Name(personSubject);
         long now = System.currentTimeMillis();
         JcaX509v3CertificateBuilder b = new JcaX509v3CertificateBuilder(
                 new X500Name(issuer.getSubjectX500Principal().getName()),
@@ -175,8 +188,8 @@ public final class BankIdFixture {
 
     /**
      * A signed BankID response carrying a specific {@code usrNonVisibleData}
-     * payload — used to exercise the canonical request binding produced by
-     * {@code BankIdService.expectedBinding(...)}.
+     * payload — used to exercise the mandate read by
+     * {@code BankIdService.parseMandate(...)}.
      */
     public String signedResponseBoundTo(String visibleText, String nonVisibleData) throws Exception {
         return signedResponseBase64(visibleText, false, false, nonVisibleData);
@@ -329,6 +342,13 @@ public final class BankIdFixture {
         Element name = doc.createElementNS(BANKID_NS, "name");
         name.setTextContent(b64("name=Testbolaget,serialNumber=5566778899,o=Testbank,c=SE"));
         srv.appendChild(name);
+        // A fresh value per order, so two orders with the same texts are two
+        // different signatures (issuances are counted per signature).
+        Element nonce = doc.createElementNS(BANKID_NS, "nonce");
+        byte[] random = new byte[16];
+        new java.security.SecureRandom().nextBytes(random);
+        nonce.setTextContent(Base64.getEncoder().encodeToString(random));
+        srv.appendChild(nonce);
         sd.appendChild(srv);
         return sd;
     }
@@ -394,26 +414,88 @@ public final class BankIdFixture {
                 ocspKp.getPrivate(), false);
     }
 
+    /** A good response produced at {@code producedAt}, with {@code thisUpdate} at the same time. */
+    public String ocspProducedAt(String signatureBase64, Date producedAt) throws Exception {
+        return ocspResponse(signatureBase64, CertificateStatus.GOOD, ocspCert, ocspKp.getPrivate(), true,
+                producedAt, producedAt, bankCaCert);
+    }
+
+    /** A good response produced now whose entry claims {@code thisUpdate}. */
+    public String ocspThisUpdate(String signatureBase64, Date thisUpdate) throws Exception {
+        return ocspResponse(signatureBase64, CertificateStatus.GOOD, ocspCert, ocspKp.getPrivate(), true,
+                new Date(), thisUpdate, bankCaCert);
+    }
+
+    /**
+     * A good response whose entry names the person certificate's serial number
+     * under another issuer (the unrelated CA's name and key hashes).
+     */
+    public String ocspSameSerialOtherIssuer(String signatureBase64) throws Exception {
+        return ocspResponse(signatureBase64, CertificateStatus.GOOD, ocspCert, ocspKp.getPrivate(), true,
+                new Date(), new Date(), foreignCaCert);
+    }
+
     private String ocspResponse(String signatureBase64,
                                 CertificateStatus status,
                                 X509Certificate responderCert,
                                 PrivateKey signingKey,
                                 boolean withNonce) throws Exception {
+        return ocspResponse(signatureBase64, status, responderCert, signingKey, withNonce,
+                new Date(), new Date(), bankCaCert);
+    }
+
+    /** A good response signed by a responder whose certificate has expired. */
+    public String ocspExpiredResponder(String signatureBase64) throws Exception {
+        return ocspResponse(signatureBase64, CertificateStatus.GOOD, expiredOcspCert,
+                expiredOcspKp.getPrivate(), true);
+    }
+
+    /** A good response with the given {@code nextUpdate}. */
+    public String ocspNextUpdate(String signatureBase64, Date nextUpdate) throws Exception {
+        return ocspResponse(signatureBase64, CertificateStatus.GOOD, ocspCert, ocspKp.getPrivate(), 32,
+                new Date(), new Date(), bankCaCert, nextUpdate);
+    }
+
+    /** A good response whose nonce is the SHA-1 of the signature and nothing more (20 bytes). */
+    public String ocspExactNonce(String signatureBase64) throws Exception {
+        return ocspResponse(signatureBase64, CertificateStatus.GOOD, ocspCert, ocspKp.getPrivate(), 20,
+                new Date(), new Date(), bankCaCert, null);
+    }
+
+    private String ocspResponse(String signatureBase64,
+                                CertificateStatus status,
+                                X509Certificate responderCert,
+                                PrivateKey signingKey,
+                                boolean withNonce,
+                                Date producedAt,
+                                Date thisUpdate,
+                                X509Certificate certIdIssuer) throws Exception {
+        return ocspResponse(signatureBase64, status, responderCert, signingKey, withNonce ? 32 : 0,
+                producedAt, thisUpdate, certIdIssuer,
+                new Date(Math.max(System.currentTimeMillis(), thisUpdate.getTime()) + 3600_000L));
+    }
+
+    private String ocspResponse(String signatureBase64,
+                                CertificateStatus status,
+                                X509Certificate responderCert,
+                                PrivateKey signingKey,
+                                int nonceLength,
+                                Date producedAt,
+                                Date thisUpdate,
+                                X509Certificate certIdIssuer,
+                                Date nextUpdate) throws Exception {
         BasicOCSPRespBuilder builder = new BasicOCSPRespBuilder(
                 new JcaRespID(responderCert.getSubjectX500Principal()));
 
         CertificateID certId = new JcaCertificateID(
                 new JcaDigestCalculatorProviderBuilder().build().get(CertificateID.HASH_SHA1),
-                bankCaCert, personCert.getSerialNumber());
-        // In BouncyCastle this overload's Date argument is nextUpdate, not
-        // thisUpdate — passing "now" produces a response that is already stale.
-        Date nextUpdate = new Date(System.currentTimeMillis() + 3600_000L);
-        builder.addResponse(certId, status, nextUpdate, (Extensions) null);
+                certIdIssuer, personCert.getSerialNumber());
+        builder.addResponse(certId, status, thisUpdate, nextUpdate, (Extensions) null);
 
-        if (withNonce) {
+        if (nonceLength > 0) {
             byte[] head = MessageDigest.getInstance("SHA-1")
                     .digest(signatureBase64.getBytes(StandardCharsets.UTF_8));
-            byte[] nonce = new byte[32];
+            byte[] nonce = new byte[nonceLength];
             System.arraycopy(head, 0, nonce, 0, head.length);
             builder.setResponseExtensions(new Extensions(new Extension(
                     OCSPObjectIdentifiers.id_pkix_ocsp_nonce, true, new DEROctetString(nonce))));
@@ -423,7 +505,7 @@ public final class BankIdFixture {
         return Base64.getEncoder().encodeToString(new OCSPRespBuilder()
                 .build(OCSPRespBuilder.SUCCESSFUL,
                         builder.build(cs, new org.bouncycastle.cert.X509CertificateHolder[] {
-                                new JcaX509CertificateHolder(responderCert) }, new Date()))
+                                new JcaX509CertificateHolder(responderCert) }, producedAt))
                 .getEncoded());
     }
 }

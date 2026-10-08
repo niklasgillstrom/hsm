@@ -4,6 +4,361 @@ Versions before 1.4.0 have no entry here; their history is recorded in
 `PEER_REVIEW_GUIDE.md` ("Version 1.3.0 — what changed and what to verify" and
 "Corrections after documentation-versus-code review").
 
+## 1.6.0 (2026-10-08)
+
+### Security
+
+- **Customer and technical supplier sent to the gatekeeper.** The verify
+  request carried the customer's organisation number as `supplierIdentifier`
+  and the BankID relying party's name as `supplierName`: via a technical
+  supplier the two named different parties, and the supplier's identity was
+  not recorded. hsm now sends the customer (`customerOrganisationNumber`,
+  `customerSwishNumber`) and, when the caller's transport certificate is a
+  technical supplier's (987…), the supplier (`supplierIdentifier` = O,
+  `supplierNumber` = CN, `supplierName` only when the supplier is the BankID
+  relying party). A customer calling with its own 123 certificate has no
+  supplier fields. The receipt must echo all four (`REJECTED_RECEIPT_MISMATCH`
+  otherwise). **Breaking:** receipt canonical form `v3`, in step with
+  gatekeeper 1.6.0. `ReceiptVerifier` still verifies a retained `v2` receipt
+  (1.4.0–1.5.0), but only one without the new fields, so they cannot be added
+  to an old receipt unsigned. Tests: `AttestationServiceGatekeeperFlowTest`
+  (`theGatekeeperIsToldTheCustomerAndTheTechnicalSupplier`,
+  `aCustomerCallingItselfHasNoTechnicalSupplier`,
+  `aSupplierThatIsNotTheRelyingPartyIsNotGivenItsName`, three new receipt
+  mismatch cases), `ReceiptVerifierAlgorithmTest`
+  (`aReceiptSignedBefore160StaysVerifiable`,
+  `partyFieldsCannotBeAddedToAReceiptSignedBefore160`), golden bytes.
+- **Weak CSR signature algorithms could be configured.** The README said
+  SHA-1 and MD5 are refused, but `swish.key-policy.allowed-csr-signature-algorithms`
+  accepted them when an operator listed them. Start-up now fails for any
+  SHA-1 or MD2/MD5 entry (`KeyPolicyTest.weakCsrSignatureAlgorithmsCannotBeConfigured`).
+- **Mutation testing with PIT** (`mvn -Ppit test-compile org.pitest:pitest-maven:mutationCoverage`,
+  PIT 1.30.0 with the JUnit 5 plugin 1.2.3, which runs under JUnit 6.0.3).
+  First run over all of hsm: 2 094 mutations, 76 % killed, test strength
+  88 %, 298 without coverage; now 2 074 of 2 074 detected (2 070 killed,
+  4 timed out), and the profile fails below 100 %. New tests cover the
+  vendor dispatch, early refusals and every issuance stage of
+  `AttestationService` (with mocked collaborators), BankID parsing, OCSP
+  shapes, Id registration, certificate extraction and the PKIX path, the
+  mock gatekeeper and issuance clients, the receipt verifier's refusals, the
+  HTTP client, the policies' start-up warnings and refusal wording, and the
+  size filter's counting stream. Redundant constructs whose mutants no test
+  could kill were removed, not suppressed (see `PEER_REVIEW_GUIDE.md`,
+  Mutation testing); `SwishCaService`, referred to by nothing, is removed. Two survivors of the earlier manual run are
+  now killed: ignoring the XML-DSig result
+  (`BankIdSignatureVerificationTest.payloadAlteredAfterSigningIsRejected`)
+  and bypassing the gatekeeper key registry
+  (`ReceiptVerifierAlgorithmTest.aReceiptSignedByAKeyOutsideTheRegistryIsRefused`).
+- **Build:** swagger-ui 5.33.1; Lombok 1.18.48 for the dependency as for the
+  annotation processor (Spring Boot manages 1.18.46).
+- **The caller's transport certificate is bound to the request.** The API is
+  called with mTLS, with the company's transport certificate (its Swish
+  number, 123…) or the technical supplier's (987…). Until now the service did
+  not look at that certificate, so any holder of a valid transport
+  certificate could submit a request for another company. `CallerPolicy` now
+  requires a 123 certificate's CN to be the request's Swish number and its O
+  the request's organisation number, and a 987 certificate's O to be the
+  BankID relying party; anything else, or no certificate, is refused
+  (`CALLER_NOT_BOUND`, `CALLER_CERTIFICATE_MISSING`). On by default
+  (`swish.caller-binding=required`); the `dev` profile sets `off`. The
+  certificate's chain and validity remain the TLS layer's job
+  (`server.ssl.client-auth=need`, Swish CA in the trust store).
+  Tests: `CallerPolicyTest` (12), `AttestationServiceTransportTest.callerBinding`,
+  `AttestationControllerCallerTest` (2) and `CallerCertificateWiringTest`,
+  which makes real mTLS calls. Each fails when the certificate is not passed
+  from the TLS layer to the service or not checked there (mutants: controller
+  passes null, service skips the check, `verifyAndIssue` drops the caller,
+  controller takes the last certificate of the chain instead of the leaf).
+
+- **Build:** Jackson 3.1.7 and 2.21.7 instead of the 3.1.5 and 2.21.5 that
+  Spring Boot 4.1.1 manages (CVE-2026-83557, listed as fixed in 3.1.6 and
+  2.21.6); `project.build.outputTimestamp`, so the same commit builds to a
+  byte-identical jar (two builds of railgate compared: different hashes
+  without it, identical with it); and the OWASP Dependency-Check scan moved
+  to the `owasp` profile (`mvn -Powasp verify`), so a build without
+  network access or NVD key can run the tests.
+
+- **TRANSPORT requests require confirmed signatory rights.** Until now a
+  TRANSPORT request whose signatory could not be confirmed (UNKNOWN or
+  UNAUTHORISED) was issued with a warning. With the default
+  `FailClosedSignatoryRightsVerifier`, which answers UNKNOWN to every query,
+  any BankID holder could therefore obtain a TRANSPORT certificate for any
+  organisation and Swish number. The signatory check is now a hard error for
+  every certificate type (`AttestationService.verify`).
+- **TRANSPORT issuance has its own stage.** `verifyAndIssue` reported a
+  TRANSPORT issuance, in which no gatekeeper takes part, as
+  `VERIFIED_ISSUED_AND_CONFIRMED`, the stage that means the supervisory loop
+  is closed. It is now `ISSUED_TRANSPORT_NOT_SUPERVISED`.
+- Tests: `AttestationServiceTransportTest` (3 new, each failing before the
+  change). `AttestationServiceRequestBindingTest` asserted that a TRANSPORT
+  request was valid while signatory rights were UNKNOWN; it now confirms
+  signatory rights with a stub, since it tests the request bindings only.
+- **The retained receipt can be re-verified.** `IssuanceResponse.VerifyResponseSummary`,
+  the audit record of the gatekeeper receipt, left out `confirmationNonce`,
+  which is the third field of the signed v2 canonical form, and stored absent
+  `keyProperties` / `doraCompliance` as `false` where the canonical form
+  writes empty fields. The record therefore could not rebuild the signed
+  bytes, and `ReceiptVerifier` rejected every retained receipt. The summary
+  now carries the nonce and whether each sub-object was present, and
+  `toVerifyResponse()` rebuilds the receipt for verification. Tests:
+  `VerifyResponseSummaryTest` (2) and
+  `AttestationServiceGatekeeperFlowTest.retainedReceiptReverifiesFromTheAuditRecord`,
+  all three failing before the change. Retention itself is still the
+  deployer's: nothing in this repository persists the `IssuanceResponse`.
+- **Key and CSR signature-algorithm policy.** No key size, curve or
+  algorithm was checked: RSA-512, RSA-1024, secp192r1 and a CSR signed with
+  MD5withRSA were all issued for. `KeyPolicy` now refuses any key not in
+  `swish.key-policy.allowed-keys` (default `RSA-4096`) and any CSR signature
+  algorithm not in `swish.key-policy.allowed-csr-signature-algorithms`
+  (default SHA-256, SHA-384 or SHA-512 with RSA), with `KEY_POLICY_VIOLATION`.
+  Both real fixtures (RSA-4096, `sha256WithRSAEncryption`) pass the default.
+  Tests: `KeyPolicyTest` (7) and
+  `AttestationServiceTransportTest.defaultKeyPolicyRefusesRsa2048`. Tests that
+  use synthetic RSA-2048 keys name `RSA-2048` in their policy explicitly.
+- **What the BankID signatory saw, and who asked.** The request binding sits
+  in `usrNonVisibleData`, which the signatory never sees, and neither the
+  BankID relying party nor `usrVisibleData` was checked. Any company with a
+  BankID agreement could have a signatory approve a harmless text with the
+  binding hidden, and the signature authorised a certificate.
+  `BankIdConsentPolicy` now requires the relying party's organisation number
+  (`srvInfo`) to be in `swish.bankid.allowed-relying-parties` (empty by
+  default, refusing everything) and the visible text to contain the request's
+  organisation number and Swish number. Tests: `BankIdConsentPolicyTest` (9)
+  and two in `AttestationServiceTransportTest`. The existing service tests
+  signed "Jag godkanner avtalet"; they now sign a mandate text naming the
+  organisation and Swish number.
+- **The confirm response is verified.** Its integrity rested on TLS alone:
+  any party able to answer the confirm call could return `loopClosed=true`
+  with the right `verificationId`, and the issuance was recorded as
+  `VERIFIED_ISSUED_AND_CONFIRMED`. A null `publicKeyMatch` was accepted for an
+  issued certificate, and the key the gatekeeper confirmed was never compared
+  with the CSR. Gatekeeper 1.6.0 signs the response (`ConfirmationCanonicalizer`,
+  form `c1`, golden literal shared in `ConfirmationCanonicalizerGoldenBytesTest`);
+  `ReceiptVerifier.verifyConfirmation` checks it against the trusted gatekeeper
+  keys, and `AttestationService` now also requires `publicKeyMatch=true` and
+  the confirmed `actualPublicKeyFingerprint` to equal the CSR's. **Requires
+  gatekeeper 1.6.0**: an unsigned response from an older gatekeeper now ends
+  in `ISSUED_BUT_CONFIRM_NOT_CLOSED`. `MockGatekeeperClient` signs its
+  responses. `IssuanceConfirmResponse.RegistryStatus` gains
+  `ANOMALY_NONCE_MISMATCH`, which the gatekeeper already used. Tests: the
+  golden test (2) and two in `AttestationServiceGatekeeperFlowTest`
+  (`unsignedConfirmIsNotAClosedLoop`, `signedConfirmForAnotherKeyIsNotAClosedLoop`),
+  both failing against the previous check.
+
+- **BankID signatures had no age limit and could be reused.** The OCSP
+  response's `producedAt`, `thisUpdate` and the signing time were never
+  compared with the current time, and BankID's responses carry no
+  `nextUpdate` (verified in the production example in `README.md`), so a
+  signature and its response were accepted at any age and for any number
+  of issuances. `producedAt` must now be at most
+  `swish.bankid.max-signature-age` (default `PT15M`) old, and neither it
+  nor `thisUpdate` may be more than 5 minutes in the future; and a
+  signature authorises as many issuances as its mandate states (below),
+  after which an issuance is refused (`REJECTED_BANKID_ALREADY_USED`,
+  closing that gatekeeper verification as not issued). Tests:
+  `BankIdSignatureVerificationTest` (`staleProducedAtIsRejected`,
+  `futureProducedAtOrThisUpdateIsRejected`, `aSignatureIsConsumedCountTimes`,
+  `consumptionIsAtomic`, `consumedSignaturesExpire` and others),
+  `AttestationServiceTransportTest.aBankIdSignatureIsUsedCountTimes`,
+  `AttestationServiceGatekeeperFlowTest.aOneCertificateMandateAuthorisesOneSigningIssuance`.
+- **OCSP entries were matched on serial number alone.** A serial number is
+  unique only per CA; the entry must now also name the issuing CA by its
+  name and key hashes (`sameSerialOtherIssuerIsRejected`).
+- **The BankID binding did not fit the mandate.** The signatory approves a
+  mandate for N certificates ("fyra (4) Swish-certifikat"), collected once;
+  the technical supplier then makes one call per certificate and creates
+  each CSR just before its call. `hsm-csr:v1` bound each signature to one
+  CSR, so a signature could obtain certificates for one key only, but for
+  that key without limit, and the count the signatory saw was never read.
+  **Breaking:** `usrNonVisibleData` now carries
+  `hsm-mandate:v1;org=…;swish=…;count=<1..99>`; the visible text must state
+  the count as "(N)"; one signature authorises at most N issuances, with any
+  CSRs. `hsm-csr:v1` strings are refused. Tests:
+  `AttestationServiceRequestBindingTest` (`oneMandateCoversSeveralCsrs`,
+  `mandateForAnotherNumberIsRejected`, `csrBoundBindingIsRejected`,
+  `countNotInTheVisibleTextIsRejected`), `BankIdSignatureVerificationTest`
+  (`malformedMandatesAreRejected`), `BankIdConsentPolicyTest.theCountMustBeStated`.
+
+- **A gatekeeper receipt was checked for authenticity and key only.** A
+  genuine, compliant receipt for the same key but another country,
+  supplier or key purpose, or an old one, authorised issuance. The receipt
+  must now be within 5 minutes of now, echo the country code, supplier
+  identifier, key purpose and HSM vendor this request sent, and report key
+  properties consistent with compliance; otherwise
+  `REJECTED_RECEIPT_MISMATCH`. Tests:
+  `AttestationServiceGatekeeperFlowTest.receiptFieldsMustMatchTheRequest`
+  (twelve cases; with the previous code a receipt for another country was
+  issued on), `receiptWithinTheLimitsIsAccepted`, `ReceiptMismatchTest`.
+- **Receipt signatures were verified with SHA256withRSA only.** gatekeeper
+  can sign with any `gatekeeper.signing.algorithm`; hsm now uses
+  `swish.gatekeeper.signature-algorithm` (default SHA256withRSA, SHA-1 and
+  MD5 refused) (`ReceiptVerifierAlgorithmTest`).
+- **The gatekeeper link accepted plain HTTP, and mTLS could only be set
+  JVM-wide.** `HttpGatekeeperClient` now refuses an `http://` URL unless
+  `swish.gatekeeper.allow-insecure-http=true`, takes its TLS material from
+  the SSL bundle named by `swish.gatekeeper.ssl-bundle`, follows no
+  redirects, and quotes at most 512 characters of an error body on one
+  line (`HttpGatekeeperClientTransportTest`). `THREAT_MODEL.md` and
+  `INTEGRATION_GUIDE.md` described a Spring-side mTLS configuration that
+  never reached the JDK client.
+- All 29 guard mutants of the receipt and transport changes are killed.
+
+- **No request size limit.** Spring Boot bounds form and multipart bodies,
+  not JSON, so a request of any size was read in full; `THREAT_MODEL.md`
+  said bodies were limited to about 2 MB. `RequestSizeLimitFilter` (as in
+  gatekeeper and railgate) caps bodies at
+  `swish.limits.max-http-request-size` (1 MB) and headers at 8 KB
+  (`RequestSizeLimitFilterTest`, and `RequestSizeLimitWiringTest` on a
+  running server).
+- **One reading of the CSR.** CSRs were read in four places: the BankID
+  binding hash stripped every PEM header and decoded what was left, the
+  signature check read the first PEM block, and mock issuance knew only
+  the `CERTIFICATE REQUEST` label. Two PEM blocks in one field were hashed
+  together but only the first was verified, and a CSR labelled `NEW
+  CERTIFICATE REQUEST` passed verification and failed at issuance. `Csrs`
+  now accepts exactly one block (either label, the same at both ends) or
+  bare base64, and every step uses its DER (`CsrsTest`,
+  `MockIssuanceClientTest.aCsrWithTheNewCertificateRequestLabelIsIssued`).
+- **`SecurosysVerifier.verifyChain` returned true for any input.** It is
+  not called by the verification flow, but it is the interface's chain
+  check; it now runs the same PKIX validation under the pinned root
+  (`verifyChainValidatesAgainstThePinnedRoot`). The same fix is in
+  gatekeeper.
+- **The mock gatekeeper accepted a confirmation nonce more than once** and
+  kept its approvals in two unsynchronised maps. It now spends the nonce
+  atomically, as gatekeeper does (`MockGatekeeperClientConcurrencyTest`;
+  with the previous code a nonce confirmed twice, and up to sixteen racing
+  confirms succeeded).
+- **Logging defaulted to DEBUG** in the shipped `application.yaml`, where
+  `THREAT_MODEL.md` describes DEBUG as the operator's choice; it is INFO.
+- **Dead code removed:** the superseded `witness` package and its test,
+  which were empty stubs marked for deletion, and the unused
+  `client.GatekeeperClient` component.
+- **README examples** showed `bankIdUsrNonVisibleData` as a bare hash, which
+  would be refused with `BANKID_NOT_BOUND_TO_REQUEST`; they now show the
+  mandate string.
+
+### Verifiers
+
+- **Securosys key origin is read from the attestation.** The verifier never
+  read `<private_key creation="...">`, and `AttestationService` reported
+  `keyOrigin="generated"` for every Securosys key, inferring it from
+  `never_extractable` and `always_sensitive`. Those are not origin
+  attributes; a key created outside the HSM and imported with
+  `extractable=false` was not excluded by them. The root element must now be
+  `private_key` with `creation="generated"`, otherwise
+  `SECUROSYS_KEY_NOT_GENERATED`; the reported `keyOrigin` is the attribute's
+  value. Tests: three in `SecurosysVerifierTest` (the two rejections fail
+  before the change), and `RealAttestationFixtureTest` now asserts the
+  fixture's `keyOrigin` against `expected.json`, as `examples/README.md`
+  already claimed it did.
+- **Documented, not changed:** Securosys attestations signed with PSS
+  (`CKM_SHA256_RSA_PKCS_PSS`, used in Securosys' own PKCS#11 example) are not
+  supported and are rejected. The real fixture is PKCS#1 v1.5.
+- **Azure and Google: Marvell parser rebuilt from the vendors' tools.** Both
+  verifiers parsed a format of their own (2-byte tags, a public-key tag
+  `0x0350`) that matches neither vendor's tool. `AzureHsmVerifier` read JSON
+  fields that `az keyvault key get-attestation` does not write and took the
+  public key from the JSON's JWK, which the HSM does not sign: a genuine
+  attestation of one key, paired with the JWK of another, gave
+  `publicKeyMatch=true`. The new `MarvellAttestation` ports Microsoft's
+  MIT-licensed parser and validator (`Azure/azure-managed-hsm-key-attestation`:
+  firmware 2.x and 3.x layouts, attribute numbers, signature schemes, Marvell
+  roots) and Google's `verify_attestation_chains.py` (gzip, SHA-256 PKCS#1
+  v1.5, owner chain under Hawksbill Root v1 prod). The key is bound
+  through the RSA modulus inside the signed blob (the EKCV binding was
+  added later in 1.6.0, see below); EXTRACTABLE must be false
+  and NEVER_EXTRACTABLE and LOCAL true. Azure reads the real `az` JSON;
+  Google also checks the owner chain and accepts gzip input.
+- **Marvell roots updated.** The 2015 Marvell root expired 2025-11-16; the
+  roots are now the two in Microsoft's validator: the reissued
+  LiquidSecurity root (2024-2034, same key) and the LiquidSecurity 2 root.
+- **Format gate.** No real Marvell attestation has been run through the
+  parser. Until a real fixture is committed, both
+  verifiers add `MARVELL_FORMAT_UNCONFIRMED` and never report a valid
+  attestation.
+- **Firmware 2.x signature.** Microsoft's validator compares only the
+  trailing 32 bytes of the raw RSA result with the hash. That is accepted only
+  for public exponents of at least 65537; under e = 3 a cube root modulo
+  2^256 forges it.
+- **Marvell's published format.** Marvell's "Software Key Attestation" page
+  and `verify_pubkey.py` document the response layout (one attestation of a
+  key pair carries a public- and a private-key object), `OBJ_ATTR_MODULUS`
+  (`0x0120`), the KCV (`0x0173`, first 3 bytes of SHA-1 of the DER public
+  key) and the EKCV (`0x1003`, SHA-256 of it; the page's prose says HKDF,
+  which neither its example nor its script does). Both objects are read;
+  `ulTotalSize` must be the response length; every object's key material
+  must match the CSR key, and the private key must match through its own
+  modulus or EKCV or through the public key in the same blob.
+- Tests: `MarvellAttestationTest` (12, one with Marvell's published example
+  values), `AzureHsmVerifierTest` (6, replacing 2), `GoogleCloudHsmVerifierTest`
+  (8, replacing 2).
+  `AzureHsmVerifierTest.jwkNamingTheCsrKeyIsNotABinding` fails on 1.5.0.
+- **Physical Marvell LiquidSecurity HSMs as a fifth vendor (`MARVELL`).**
+  The hardware behind Azure and Google signs its own key attestation when a
+  key is generated. `MarvellHsmVerifier` checks the manufacturer chain
+  (pinned Marvell roots → card → partition), the signature and the same key
+  evidence as the cloud verifiers. Never valid until a real attestation
+  confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). Tests:
+  `MarvellHsmVerifierTest` (5).
+- **Thales Luna as a sixth vendor (`THALES`).** A Luna HSM issues a Public
+  Key Confirmation (PKC) only for keys it generated and that cannot leave a
+  Luna HSM (Thales documentation). `ThalesLunaVerifier` checks the PKC chain
+  as Thales's MIT-licensed `luna-pkc-validator` does (signature, issuer, EKU
+  per position, CA flag, validity) under the pinned Chrysalis-ITS Root key,
+  and that the Proof of Origin key is the CSR key. Two published copies of
+  the root (serials 804500000007 and 80450000000D) carry that key. Thales's
+  own PKC and CSR test vector verifies, so this vendor is not behind a
+  format gate. Tests: `ThalesLunaVerifierTest` (8; all five guard mutants
+  are killed).
+- **Crypto4A QASM as a seventh vendor (`CRYPTO4A`).** `Crypto4AVerifier`
+  follows Crypto4A's attestation specification (C4A-302-0043): every
+  signature block (ECDSA P-384 and HSS/LMS) must verify over the DER claims,
+  carry the attestation EKU and chain to the pinned C4A_RCA key, as
+  `spa-attest verify` checks them. The key's `key-spki` must be the CSR key
+  and the same object must carry private-key class, `key-is-confined`,
+  `key-is-hardware-generated` and `key-never-extracted`, plus
+  `qasm-certified-production` and `attestation-keys-are-unique`. The PKI
+  Consortium's published QASM message verifies, both signatures included.
+  Its OIDs (`1.3.6.1.4.1.39901.6.2.x`) match Crypto4A's specification; the
+  PKI Consortium page lists them one level too deep. Tests:
+  `Crypto4AVerifierTest` (10; all eleven guard mutants are killed).
+- **Fortanix DSM as an eighth vendor (`FORTANIX`).** `FortanixVerifier`
+  follows Fortanix's "Verifying Key Attestation Statements": the Key
+  Attestation Authority certificate by PKIX with Fortanix's attestation
+  policy to the pinned Fortanix root, its EKU and Key Usage; the statement
+  signed by the authority, naming it as issuer, with no unknown critical
+  extension and a signing time within the authority's validity and not in
+  the future; the statement's key must be the CSR key and carry
+  `fortanixKeyGeneratedInDSM` and `fortanixKeyNeverExportable`. Validation
+  happens at the signing time, as Fortanix prescribes for its one-month
+  authority certificates. The sample in Fortanix's documentation verifies.
+  Tests: `FortanixVerifierTest` (7; all twelve guard mutants are killed).
+- **Entrust nShield as a ninth vendor (`ENTRUST`).** `NShieldVerifier`
+  follows Entrust's "Verifying an attestation bundle": the warrant (DDDS)
+  from the pinned KWARN-1 key through Delegation certificates to the
+  module's KLF2 and ESN (WV1); the module state certificate under KLF2 with
+  the warrant's ESN, the KML, HKNSO and the module key list, `knsopub`
+  hashing to HKNSO and `hkm` in the list (MSCV1-5); the world binding
+  certificate (plain or FIPS) under `knsopub` before `hkm` is trusted, and
+  CertKREaKRAbKNSO when present (WBCV1-5); the key generation certificate
+  under KML whose key hash is that of `pubkeydata` (KGCV1-2); the ACL read
+  in full and refused on anything unrecognised, with Entrust's forbidden
+  permissions refused, working blobs required under the trusted module key,
+  and a security-officer-certified group or MakeArchiveBlob action marking
+  the key recoverable, which is refused (the Administrator Card Set could
+  then use the key: the human factor of Art. 9(3)(d)); `pubkeydata` must be
+  the CSR key (CSRL1). Only `ModuleInformation` warrants are accepted:
+  Entrust states that `FieldUpgradeModuleInformation` certificates depend on
+  legacy DSA-1024 signatures, which NIST SP 800-131A no longer allows to be
+  made. Entrust's two examples carry such warrants and are refused after
+  their warrants verify under KWARN-1. Below the warrant, reissued under a
+  test root with the real KLF2 and ESN, Entrust's softcard example verifies
+  and its module-protected example is refused as recoverable and for
+  UseAsBlobKey. Tests: `NShieldVerifierTest` (25, with Entrust's bundles and
+  synthetic bundles from test keys, including the FIPS world binding, an
+  ECDSA KML and an RSA-4096 key; all 75 guard mutants are killed).
+
 ## 1.5.0
 
 **Deploy together with gatekeeper 1.5.0 and railgate 1.5.0.** The receipt wire

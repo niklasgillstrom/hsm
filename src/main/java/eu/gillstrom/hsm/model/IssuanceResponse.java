@@ -35,8 +35,22 @@ public class IssuanceResponse {
          * gatekeeper confirm all succeeded. The supervisory loop is closed.
          */
         VERIFIED_ISSUED_AND_CONFIRMED,
+        /**
+         * A TRANSPORT certificate was issued after local verification (CSR,
+         * BankID, signatory rights). TRANSPORT certificates are not subject to
+         * HSM-attestation supervision, so no gatekeeper took part: there is no
+         * verify-step receipt and no confirm. Kept apart from
+         * {@link #VERIFIED_ISSUED_AND_CONFIRMED} so the two are never counted
+         * together.
+         */
+        ISSUED_TRANSPORT_NOT_SUPERVISED,
         /** Local pre-checks (CSR / BankID / signatory rights / attestation) failed. */
         REJECTED_LOCAL_VERIFICATION,
+        /**
+         * Everything verified, but the BankID signature's mandate had already
+         * been used for as many issuances as it states; nothing was issued.
+         */
+        REJECTED_BANKID_ALREADY_USED,
         /** Gatekeeper verify call could not be completed (transport, configuration). */
         REJECTED_GATEKEEPER_VERIFY_FAILED,
         /** Gatekeeper verify completed but returned {@code compliant=false}. */
@@ -52,6 +66,13 @@ public class IssuanceResponse {
          * receipt for some other key is not an authorisation for this one.
          */
         REJECTED_RECEIPT_KEY_MISMATCH,
+        /**
+         * The receipt is authentic and approves this key, but is not a receipt
+         * for this request: it is stale or from the future, names another
+         * country, supplier, key purpose or HSM vendor, or its key properties
+         * contradict compliance.
+         */
+        REJECTED_RECEIPT_MISMATCH,
         /** Issuance step failed after a successful gatekeeper verify. */
         REJECTED_ISSUANCE_FAILED,
         /**
@@ -61,10 +82,12 @@ public class IssuanceResponse {
         ISSUED_BUT_GATEKEEPER_CONFIRM_FAILED,
         /**
          * Anomalous: certificate was issued and the gatekeeper answered the
-         * confirm call, but the answer does not close the loop — a mismatched
-         * {@code verificationId}, {@code loopClosed=false}, or an approval
-         * registry that ended in a state other than
-         * {@code VERIFIED_AND_ISSUED}. Distinguished from
+         * confirm call, but the answer does not close the loop: a signature
+         * that does not verify under a trusted gatekeeper key, a mismatched
+         * {@code verificationId}, no or another registry status than
+         * {@code VERIFIED_AND_ISSUED}, {@code loopClosed=false},
+         * {@code publicKeyMatch} not true, or a confirmed public key other
+         * than the issued certificate's. Distinguished from
          * {@link #ISSUED_BUT_GATEKEEPER_CONFIRM_FAILED} because here the
          * gatekeeper did respond: the supervisory record contradicts the
          * issuance rather than being absent.
@@ -94,6 +117,17 @@ public class IssuanceResponse {
                 .issued(false)
                 .verification(v)
                 .errors(v.getErrors())
+                .build();
+    }
+
+    public static IssuanceResponse rejectedBankIdAlreadyUsed(VerificationResponse v, VerifyResponse receipt) {
+        return IssuanceResponse.builder()
+                .stage(Stage.REJECTED_BANKID_ALREADY_USED)
+                .issued(false)
+                .verification(v)
+                .verifyReceipt(receipt == null ? null : VerifyResponseSummary.from(receipt))
+                .errors(List.of("BANKID_SIGNATURE_ALREADY_USED: this BankID signature has already been "
+                        + "used for an issuance; a new signature is required"))
                 .build();
     }
 
@@ -134,6 +168,17 @@ public class IssuanceResponse {
             VerifyResponse receipt, String reason) {
         return IssuanceResponse.builder()
                 .stage(Stage.REJECTED_RECEIPT_KEY_MISMATCH)
+                .issued(false)
+                .verification(v)
+                .verifyReceipt(VerifyResponseSummary.from(receipt))
+                .errors(List.of(reason))
+                .build();
+    }
+
+    public static IssuanceResponse rejectedReceiptMismatch(VerificationResponse v,
+            VerifyResponse receipt, String reason) {
+        return IssuanceResponse.builder()
+                .stage(Stage.REJECTED_RECEIPT_MISMATCH)
                 .issued(false)
                 .verification(v)
                 .verifyReceipt(VerifyResponseSummary.from(receipt))
@@ -196,6 +241,17 @@ public class IssuanceResponse {
                 .build();
     }
 
+    public static IssuanceResponse issuedTransportNotSupervised(VerificationResponse v,
+            IssuedCertificate cert) {
+        return IssuanceResponse.builder()
+                .stage(Stage.ISSUED_TRANSPORT_NOT_SUPERVISED)
+                .issued(true)
+                .verification(v)
+                .certificate(IssuedCertificateSummary.from(cert))
+                .errors(List.of())
+                .build();
+    }
+
     /**
      * Audit-friendly view of the gatekeeper verify-step receipt — carries
      * the full set of decision-relevant fields plus the base64 signature so
@@ -205,6 +261,8 @@ public class IssuanceResponse {
     @Builder
     public static class VerifyResponseSummary {
         private String verificationId;
+        /** Signed field (third in the canonical form); needed to re-verify the receipt. */
+        private String confirmationNonce;
         private boolean compliant;
         private Instant verificationTimestamp;
         private String publicKeyFingerprint;
@@ -212,14 +270,25 @@ public class IssuanceResponse {
         private String hsmVendor;
         private String hsmModel;
         private String hsmSerialNumber;
+        private String customerOrganisationNumber;
+        private String customerSwishNumber;
         private String supplierIdentifier;
+        private String supplierNumber;
         private String supplierName;
         private String keyPurpose;
         private String countryCode;
+        /**
+         * Whether the receipt carried key properties at all. The canonical form
+         * renders an absent object as empty fields, not as {@code false}, so the
+         * flattened booleans below cannot express absence on their own.
+         */
+        private boolean keyPropertiesPresent;
         private boolean generatedOnDevice;
         private boolean exportable;
         private boolean attestationChainValid;
         private boolean publicKeyMatchesAttestation;
+        /** Whether the receipt carried a DORA mapping at all; see {@link #keyPropertiesPresent}. */
+        private boolean doraCompliancePresent;
         private boolean article5_2b;
         private boolean article6_10;
         private boolean article9_3c;
@@ -240,6 +309,7 @@ public class IssuanceResponse {
             VerifyResponse.DoraCompliance dc = r.getDoraCompliance();
             return VerifyResponseSummary.builder()
                     .verificationId(r.getVerificationId())
+                    .confirmationNonce(r.getConfirmationNonce())
                     .compliant(r.isCompliant())
                     .verificationTimestamp(r.getVerificationTimestamp())
                     .publicKeyFingerprint(r.getPublicKeyFingerprint())
@@ -247,10 +317,15 @@ public class IssuanceResponse {
                     .hsmVendor(r.getHsmVendor())
                     .hsmModel(r.getHsmModel())
                     .hsmSerialNumber(r.getHsmSerialNumber())
+                    .customerOrganisationNumber(r.getCustomerOrganisationNumber())
+                    .customerSwishNumber(r.getCustomerSwishNumber())
                     .supplierIdentifier(r.getSupplierIdentifier())
+                    .supplierNumber(r.getSupplierNumber())
                     .supplierName(r.getSupplierName())
                     .keyPurpose(r.getKeyPurpose())
                     .countryCode(r.getCountryCode())
+                    .keyPropertiesPresent(kp != null)
+                    .doraCompliancePresent(dc != null)
                     .generatedOnDevice(kp != null && kp.isGeneratedOnDevice())
                     .exportable(kp != null && kp.isExportable())
                     .attestationChainValid(kp != null && kp.isAttestationChainValid())
@@ -266,6 +341,42 @@ public class IssuanceResponse {
                     .signingCertificatePem(r.getSigningCertificate())
                     .errors(r.getErrors())
                     .warnings(r.getWarnings())
+                    .build();
+        }
+
+        /**
+         * Rebuild the receipt from this record, so that an auditor can run
+         * {@link eu.gillstrom.hsm.gatekeeper.ReceiptVerifier#verify} on it
+         * without access to the original wire response.
+         */
+        public VerifyResponse toVerifyResponse() {
+            return VerifyResponse.builder()
+                    .verificationId(verificationId)
+                    .confirmationNonce(confirmationNonce)
+                    .compliant(compliant)
+                    .verificationTimestamp(verificationTimestamp)
+                    .publicKeyFingerprint(publicKeyFingerprint)
+                    .publicKeyAlgorithm(publicKeyAlgorithm)
+                    .hsmVendor(hsmVendor)
+                    .hsmModel(hsmModel)
+                    .hsmSerialNumber(hsmSerialNumber)
+                    .customerOrganisationNumber(customerOrganisationNumber)
+                    .customerSwishNumber(customerSwishNumber)
+                    .supplierIdentifier(supplierIdentifier)
+                    .supplierNumber(supplierNumber)
+                    .supplierName(supplierName)
+                    .keyPurpose(keyPurpose)
+                    .countryCode(countryCode)
+                    .keyProperties(!keyPropertiesPresent ? null
+                            : new VerifyResponse.KeyProperties(generatedOnDevice, exportable,
+                                    attestationChainValid, publicKeyMatchesAttestation))
+                    .doraCompliance(!doraCompliancePresent ? null
+                            : new VerifyResponse.DoraCompliance(article5_2b, article6_10,
+                                    article9_3c, article9_3d, article9_4d, article28_1a, doraSummary))
+                    .signature(signatureBase64)
+                    .signingCertificate(signingCertificatePem)
+                    .errors(errors)
+                    .warnings(warnings)
                     .build();
         }
     }

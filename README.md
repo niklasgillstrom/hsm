@@ -50,7 +50,7 @@ The companion repository `gatekeeper` carries the supervisory side and includes 
   "certificateType": "SIGNING",          // Required: SIGNING or TRANSPORT — enforced server-side
   "bankIdSignatureResponse": "PD94bWwgdmVyc2lvbj0iMS4wI...",
   "bankIdOcspResponse": "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",
-  "organisationNumber": "5569741234",
+  "organisationNumber": "5569541234",
   "swishNumber": "1234567890",
   "hsmVendor": "SECUROSYS",                             // Required for SIGNING; ignored for TRANSPORT
   "attestationData": "PD94bWwgdmVyc2lvbj0iMS4wI...",    // Required for SIGNING (not YubiHSM 2)
@@ -68,7 +68,7 @@ The companion repository `gatekeeper` carries the supervisory side and includes 
   "csrPublicKeyAlgorithm": "RSA",
   "attestedPublicKeyFingerprint": "c2:e7:bc:ce:c8:ae:e1:ed:22:df:6d:69:6d:ba:45:7f:59:55:4b:28:9b:65:08:92:f9:9b:3e:5c:c7:0d:e0:6f",
   "hsmVendor": "Securosys",
-  "hsmModel": "Primus HSM",
+  "hsmModel": "Primus HSM (RSA 4096)",
   "hsmSerialNumber": "18000000",
   "publicKeyMatch": true,
   "attestationChainValid": true,
@@ -80,7 +80,7 @@ The companion repository `gatekeeper` carries the supervisory side and includes 
   "bankIdPersonalNumber": "19880807****",
   "bankIdName": "Test Testsson",
   "bankIdUsrVisibleData": "Bolagsnamn AB (556954-1234) ger härmed Teknisk leverantör AB (556964-1234) fullmakt att hämta fyra (4) Swish-certifikat för Swish-nummer 1234567890 kopplat till TL-nummer 9876543210.",
-  "bankIdUsrNonVisibleData": "0b7ee6f76c72db770ed5c7fb2d01f9d6a5e9e3160fe9e4f37c678167d055af1e",
+  "bankIdUsrNonVisibleData": "hsm-mandate:v1;org=5569541234;swish=1234567890;count=4",
   "bankIdRelyingPartyName": "Teknisk leverantör AB",
   "bankIdRelyingPartyOrgNumber": "5569641234",
   "bankIdSignatureTime": "2026-01-15T12:00:00Z",
@@ -113,7 +113,7 @@ The companion repository `gatekeeper` carries the supervisory side and includes 
   "bankIdPersonalNumber": "19880807****",
   "bankIdName": "Test Testsson",
   "bankIdUsrVisibleData": "Bolagsnamn AB (556954-1234) ger härmed Teknisk leverantör AB (556964-1234) fullmakt att hämta fyra (4) Swish-certifikat för Swish-nummer 1234567890 kopplat till TL-nummer 9876543210.",
-  "bankIdUsrNonVisibleData": "0b7ee6f76c72db770ed5c7fb2d01f9d6a5e9e3160fe9e4f37c678167d055af1e",
+  "bankIdUsrNonVisibleData": "hsm-mandate:v1;org=5569541234;swish=1234567890;count=4",
   "bankIdRelyingPartyName": "Teknisk leverantör AB",
   "bankIdRelyingPartyOrgNumber": "5569641234",
   "bankIdSignatureTime": "2026-01-15T12:00:00Z",
@@ -134,12 +134,12 @@ CertificateRequest (CSR + attestation + BankID + signatory rights)
       │
       ▼
 Phase 1 — Local verification (AttestationService.verifyAndIssue, local pre-check)
-      │   PKIX chain → pinned vendor root (Securosys / Yubico / Marvell)
+      │   Chain → pinned vendor root (PKIX for Securosys / Yubico / Fortanix; explicit signature checks for the others)
       │   CSR public-key match against attested key
       │   BankID XML-DSig + OCSP (with XXE-protected DocumentBuilder)
       │   Signatory rights (pluggable; default is fail-closed)
       │
-      ├─ invalid → IssuanceResponse{stage=LOCAL_VERIFICATION_FAILED}, no gatekeeper call
+      ├─ invalid → IssuanceResponse{stage=REJECTED_LOCAL_VERIFICATION}, no gatekeeper call
       │
       ▼
 Phase 2 — Gatekeeper.verify (GatekeeperClient.verify, supervisory cross-check)
@@ -148,9 +148,16 @@ Phase 2 — Gatekeeper.verify (GatekeeperClient.verify, supervisory cross-check)
       │   Gatekeeper signs the canonical bytes of VerifyResponse with its NCA key
       │   ReceiptVerifier checks signature against GatekeeperKeyRegistry
       │   Receipt's publicKeyFingerprint compared against the CSR's public key
+      │   Receipt must be within 5 minutes of now and echo the request's country,
+      │   supplier, key purpose and HSM vendor, with key properties of a compliant key
+      │   One of the BankID mandate's `count` issuances is used
       │
-      ├─ non-compliant or signature invalid → stage=GATEKEEPER_REJECTED, no issuance
+      ├─ call failed → stage=REJECTED_GATEKEEPER_VERIFY_FAILED
+      ├─ compliant=false → stage=REJECTED_GATEKEEPER_NOT_COMPLIANT
+      ├─ signature invalid → stage=REJECTED_GATEKEEPER_RECEIPT_INVALID
       ├─ receipt approves a different key → stage=REJECTED_RECEIPT_KEY_MISMATCH
+      ├─ receipt is not this request's → stage=REJECTED_RECEIPT_MISMATCH
+      ├─ mandate's count used up → stage=REJECTED_BANKID_ALREADY_USED (confirm: not issued)
       │
       ▼
 Phase 3 — Issuance (IssuanceClient.issue, certificate produced)
@@ -158,7 +165,7 @@ Phase 3 — Issuance (IssuanceClient.issue, certificate produced)
       │   Production: replace with adapter against Getswish CA
       │   IssuedCertificate carries verifyReceiptId binding it to the VerifyResponse
       │
-      ├─ issuance failure → stage=ISSUANCE_FAILED, no confirm sent
+      ├─ issuance failure → stage=REJECTED_ISSUANCE_FAILED, confirm sent with issued=false
       │
       ▼
 Phase 4 — Gatekeeper.confirm (GatekeeperClient.confirm, supervisory closure)
@@ -171,8 +178,10 @@ Phase 4 — Gatekeeper.confirm (GatekeeperClient.confirm, supervisory closure)
       │   (anomalous state — the certificate exists but the registry could not be
       │    closed; flagged for supervisory review, the certificate must be revoked
       │    unless the failure is shown to be transport-level only)
-      ├─ confirm answered but does not close the loop (foreign verificationId,
-      │   loopClosed=false, or a registryStatus other than VERIFIED_AND_ISSUED)
+      ├─ confirm answered but does not close the loop (signature not under a
+      │   trusted gatekeeper key, foreign verificationId, loopClosed=false, a
+      │   registryStatus other than VERIFIED_AND_ISSUED, or the confirmed key
+      │   is not the issued certificate's)
       │   → stage=ISSUED_BUT_CONFIRM_NOT_CLOSED (equally anomalous: here the
       │    supervisory record actively contradicts the issuance)
       │
@@ -191,10 +200,19 @@ The gatekeeper and issuance components are pluggable via `application.yaml` / en
 | Property | Reference default | Production value |
 | -------- | ----------------- | ---------------- |
 | `swish.gatekeeper.mode` | `fail-closed` | `http` |
-| `swish.gatekeeper.url` | unset (fail-closed) | NCA gatekeeper URL, e.g. `https://dora-api.fi.se/v1/attestation` |
+| `swish.gatekeeper.url` | unset (fail-closed) | NCA gatekeeper base URL, e.g. `https://dora-api.fi.se`; the client appends `/v1/attestation/{countryCode}/verify` and `/confirm`. Must be `https://` |
+| `swish.gatekeeper.allow-insecure-http` | `false` | `true` only for a local development run against a gatekeeper without TLS |
+| `swish.gatekeeper.ssl-bundle` | empty (JVM defaults) | name of a Spring Boot SSL bundle (`spring.ssl.bundle.*`) holding the trust store for the gatekeeper's certificate and the key store for the FE's mTLS client certificate |
+| `swish.gatekeeper.signature-algorithm` | `SHA256withRSA` | the JCA algorithm the gatekeeper signs receipts with (its `gatekeeper.signing.algorithm`); SHA-1 and MD5 are refused |
 | `swish.gatekeeper.country-code` | `SE` | ISO 3166-1 alpha-2 of the operating NCA |
 | `swish.gatekeeper.timeout-ms` | `5000` | site policy |
 | `swish.gatekeeper.trusted-keys` | empty | newline- or comma-separated PEM certificates of authoritative gatekeeper signing keys, including retired keys still relevant for receipts within the DORA Article 28(6) 5-year retention window |
+| `swish.limits.max-http-request-size` | `1MB` | maximum request body (`RequestSizeLimitFilter`); larger requests are answered 413 when they declare a `Content-Length`; a chunked body is cut off once it passes the cap |
+| `swish.bankid.max-signature-age` | `PT15M` | ISO-8601 duration; a BankID signature whose OCSP `producedAt` is older is refused with `BANKID_SIGNATURE_TOO_OLD` |
+| `swish.caller-binding` | `required` (`off` in `application-dev.yaml`) | `required` — the caller's mTLS transport certificate must match the request (`CallerPolicy`): a 123 certificate its Swish and organisation numbers, a 987 certificate the BankID relying party; otherwise `CALLER_NOT_BOUND`, or `CALLER_CERTIFICATE_MISSING` without one. Needs `server.ssl.client-auth=need` with the Swish CA in `server.ssl.trust-store` |
+| `swish.bankid.allowed-relying-parties` | empty (every request refused, logged at `WARN`) | comma-separated organisation numbers of the BankID relying parties (the technical suppliers) whose BankID orders may authorise a request; any other is refused with `BANKID_RELYING_PARTY_NOT_ALLOWED` |
+| `swish.key-policy.allowed-keys` | `RSA-4096` | comma-separated allow-list of `RSA-<bits>` / `EC-<curve>` (SEC names, e.g. `EC-secp384r1`); any other key is refused with `KEY_POLICY_VIOLATION` |
+| `swish.key-policy.allowed-csr-signature-algorithms` | `SHA256withRSA,SHA384withRSA,SHA512withRSA` | comma-separated allow-list of JCA names for the CSR's own signature; SHA-1 and MD5 are refused |
 | `swish.issuance.mode` | `mock` | replace with custom `IssuanceClient` against the Getswish CA |
 | `swish.bankid.allow-test-root` | `false` (`true` in `application-dev.yaml`) | `false` — the `Test BankID Root CA v1 Test` anchor is trusted only when this is `true` |
 | `swish.issuance.mock.ca-keystore` / `-password` / `ca-alias` | empty | only for local runs: PKCS12 keystore holding the mock issuing CA, so a local gatekeeper can trust it; empty means a fresh CA per start-up |
@@ -219,46 +237,59 @@ Numbered pipeline:
 1. **CSR**: Parse PKCS#10 via BouncyCastle, **verify the CSR's own signature** under the public key it carries (proof of possession — a failure ends the request with `CSR_SIGNATURE_INVALID`), and extract the public key.
 2. **BankID XML-DSig** *(integration-side, not DORA-mandated)*: Parse the BankID signature response with XXE-protected `DocumentBuilder`, verify the enveloping XML-DSig signature against the user certificate's public key (`javax.xml.crypto.dsig.XMLSignatureFactory`, DOM provider), and validate the certificate chain with PKIX `CertPathValidator`. The signature verification is what proves that `usrVisibleData` / `usrNonVisibleData` came from the BankID holder rather than being attacker-grafted onto a legitimate certificate chain. Required because Swish uses BankID for signatory authentication, not by DORA.
    The signed payload must also **bind the signature to this request** — see "BankID request binding" below (`BANKID_NOT_BOUND_TO_REQUEST`).
-3. **OCSP (mandatory)** *(integration-side)*: Parse the OCSP response via BouncyCastle's `OCSPResp` / `BasicOCSPResp` / `SingleResp`, verify the response signature, verify the responder certificate under the public key of the CA that issued the user certificate (taken from the PKIX-validated path) and require Extended Key Usage `id-kp-OCSPSigning` (1.3.6.1.5.5.7.3.9) and a current validity period, check `CertStatus` and the nonce binding, confirm that the `CertID.SerialNumber` matches the user certificate's serial, and read `producedAt` as the authoritative signing time. **`bankIdOcspResponse` is required** (`@NotBlank`): PKIX validation of the BankID chain runs with revocation checking disabled, so this response is the only evidence of the certificate's status at authorisation time. A request without it is rejected with `BANKID_OCSP_REQUIRED`.
+3. **OCSP (mandatory)** *(integration-side)*: Parse the OCSP response via BouncyCastle's `OCSPResp` / `BasicOCSPResp` / `SingleResp`, verify the response signature, verify the responder certificate under the public key of the CA that issued the user certificate (taken from the PKIX-validated path) and require Extended Key Usage `id-kp-OCSPSigning` (1.3.6.1.5.5.7.3.9) and a current validity period, check `CertStatus` and the nonce binding, confirm that the `CertID` names the user certificate (its serial number, and the issuer name and key hashes of the CA that issued it), and read `producedAt` as the authoritative signing time. **`bankIdOcspResponse` is required** (`@NotBlank`): PKIX validation of the BankID chain runs with revocation checking disabled, so this response is the only evidence of the certificate's status at authorisation time. Over HTTP a request without it fails bean validation with 400 before the service runs; `BANKID_OCSP_REQUIRED` is the error a caller of `AttestationService` directly receives.
 4. **Signatory rights** *(integration-side)*: The pluggable `SignatoryRightsVerifier` checks whether the BankID-identified person is authorised to act as a signatory for the requested `organisationNumber` / `swishNumber`. Reference defaults:
-   - `swish.signatory-rights.mode=fail-closed` — returns `UNKNOWN` for every query and logs `WARN`; SIGNING requests fail.
-   - `swish.signatory-rights.mode=mock-registry` — loads `(personalNumber, organisationNumber)` pairs from `classpath:signatory-rights.json` to demonstrate the integration shape; not authoritative.
+   - `swish.signatory-rights.mode=fail-closed` — returns `UNKNOWN` for every query and logs `WARN`; every request fails, SIGNING and TRANSPORT alike.
+   - `swish.signatory-rights.mode=mock-registry` — loads `(personalNumber, organisationNumber)` pairs from the JSON file at `swish.signatory-rights.mock-registry.path` (default `classpath:signatory-rights.json`, which this repository does not ship, so without the property every query is UNAUTHORISED) to demonstrate the integration shape; not authoritative.
    Production deployments must replace this with a Bolagsverket- or Swish-agreement-registry-backed implementation.
 5. **HSM attestation** *(DORA-mandated; SIGNING only)*:
    - Verify that the public key in the CSR matches the attested key (constant-time comparison via `MessageDigest.isEqual`).
    - Verify the attestation certificate chain with PKIX `CertPathValidator` anchored at the pinned vendor root CA.
-   - Verify the attestation signature (BouncyCastle XML signature for Securosys; JWK + Marvell TLV for cloud HSMs).
-   - Verify key attributes: `generatedOnDevice=true`, `exportable=false`.
+   - Verify the attestation signature. Securosys: a detached `SHA256withRSA` (PKCS#1 v1.5) signature over the raw XML bytes, which is what the real fixture carries. PSS-signed attestations (`CKM_SHA256_RSA_PKCS_PSS`, the mechanism in Securosys' own PKCS#11 example `hsm-api-examples/pkcs/c/src/attestation.cpp`) are not supported and are rejected. Cloud HSMs: see the vendor table below.
+   - Verify key attributes: generated on the device and not exportable. Securosys: the root element must be `<private_key creation="generated">` (`SECUROSYS_KEY_NOT_GENERATED` otherwise) and `extractable=false`, `never_extractable=true`, `sensitive=true`, `always_sensitive=true`. Yubico: the origin and capabilities extensions.
 6. **Server-enforced certificate type** *(DORA-mandated)*: SIGNING requests that do not carry attestation evidence are rejected. TRANSPORT requests that do carry attestation data are rejected as ambiguous.
 7. **Issue certificate**: The Swish CA issues a transport or signing certificate matching the validated request type.
 
-### BankID request binding
+### BankID mandate
 
-A BankID signature proves that a person signed *something*. To make it prove that they authorised *this* certificate request, the relying party puts a canonical binding string in `usrNonVisibleData` when creating the BankID sign order. BankID returns it inside the signed `bankIdSignedData` element, so it is covered by the XML-DSig Reference and cannot be substituted after signing.
+A BankID signature proves that a person signed *something*. To make it prove that they authorised certificates for *this* organisation and Swish number, the relying party (the technical supplier) puts a mandate string in `usrNonVisibleData` when creating the BankID sign order. BankID returns it inside the signed `bankIdSignedData` element, so it is covered by the XML-DSig Reference and cannot be substituted after signing.
 
 The string, exactly (single line, no padding, no trailing separator):
 
 ```
-hsm-csr:v1;org=<organisationNumber>;swish=<swishNumber>;csr-sha256=<lowercase hex SHA-256 over the CSR's DER encoding>
+hsm-mandate:v1;org=<organisationNumber>;swish=<swishNumber>;count=<1..99>
 ```
 
-- `<organisationNumber>` and `<swishNumber>` are the values sent in the same request, verbatim.
-- `<csr-sha256>` is SHA-256 over the **DER** encoding of the PKCS#10 request — the bytes inside the PEM armour, not the base64 text and not the PEM string. With OpenSSL: `openssl req -in request.csr -outform DER | sha256sum`.
-- The string is UTF-8 encoded and base64 encoded once, into the BankID sign order's `userNonVisibleData` parameter. It comes back base64-encoded in the `usrNonVisibleData` element of the signature XML; `BankIdService` decodes that layer and compares the resulting string.
+- `<organisationNumber>` (10 or 12 digits) and `<swishNumber>` (10 digits) must equal the values sent in each request, verbatim.
+- `<count>` is the number of certificates the signatory authorises. The visible text must state the same number in parentheses, as in "fyra (4) Swish-certifikat" (`BankIdConsentPolicy`).
+- The string is UTF-8 encoded and base64 encoded once, into the BankID sign order's `userNonVisibleData` parameter. It comes back base64-encoded in the `usrNonVisibleData` element of the signature XML; `BankIdService` decodes that layer and reads the mandate. Anything other than exactly this format is no mandate (`BANKID_NOT_BOUND_TO_REQUEST`).
 
-`AttestationService` recomputes the string from the request in hand and requires byte equality (`MessageDigest.isEqual`). A missing `usrNonVisibleData`, or one belonging to a different organisation number, Swish number or CSR, is rejected with `BANKID_NOT_BOUND_TO_REQUEST`. Without this check, a signature legitimately collected for one request can be replayed with another request's CSR: the signature verifies, the personal number is genuine, and nothing else in the payload contradicts the swap.
+The signature is collected once, and the technical supplier then makes one call per certificate, creating each CSR just before its call. A CSR therefore cannot be named in the mandate, and one signature serves up to `count` requests with different CSRs. 1.4.0–1.5.0 bound each signature to one CSR (`hsm-csr:v1;org=…;swish=…;csr-sha256=…`), which allowed one key per signature, contrary to a mandate for several certificates, but did not limit how often that key was issued; that format is no longer accepted. What bounds a signature now: the count, the age limit below, the allowed relying parties and the caller's transport certificate (`CallerPolicy`), so only the company itself or the technical supplier that collected the signature can use it.
+
+A BankID signature is accepted only while it is fresh: the OCSP response's `producedAt` (the signing time) must be at most `swish.bankid.max-signature-age` old (default 15 minutes) and, like the entry's `thisUpdate`, no more than 5 minutes in the future. BankID's OCSP responses carry no `nextUpdate` (the production example above has none), so this is the only age limit. A signature authorises `count` issuances: `verifyAndIssue` uses one just before issuing, and an issuance beyond the count is refused with `REJECTED_BANKID_ALREADY_USED`. The record of used signatures is held in memory for as long as the signature is fresh; several instances behind a load balancer need a shared store to refuse a replay across them.
+
+The mandate sits in data the signatory never sees, so further checks apply (`BankIdConsentPolicy`). The BankID relying party, whose organisation number is in `srvInfo` inside the signed data, must be listed in `swish.bankid.allowed-relying-parties` (`BANKID_RELYING_PARTY_NOT_ALLOWED`). And `usrVisibleData`, the text the signatory approved, must contain the request's organisation number (with or without hyphen), its Swish number and the mandate's count in parentheses (`BANKID_VISIBLE_TEXT_MISMATCH`). The wording is otherwise free; the mandate text in the response example above satisfies it. A missing `usrNonVisibleData`, or a mandate for a different organisation number or Swish number, is rejected with `BANKID_NOT_BOUND_TO_REQUEST`.
+
+Who calls is checked as well (`CallerPolicy`). The API is called with mTLS, with the company's transport certificate (Swish number 123…) or the technical supplier's (987…). Both carry the number in CN and the organisation number in O, as in the requests in `examples/` (`C=SE, O=5569743098, CN=1231015932`). A 123 certificate may only request certificates for its own Swish number and organisation number; a 987 certificate only for requests whose BankID order it started as relying party. Any other certificate, or none, is refused (`CALLER_NOT_BOUND`, `CALLER_CERTIFICATE_MISSING`). The chain and validity of the certificate are checked by the TLS layer (`server.ssl.client-auth=need`, the Swish CA in the trust store); `CallerPolicy` reads the identity the handshake established.
 
 Steps 2–4 reflect Swish's current operational integration (BankID for signatory authentication; signatory-rights look-up against an out-of-band registry); if Swish ever switches eID provider, only steps 2–4 change. Steps 5–6 are fixed by DORA and cannot be substituted regardless of any integration-side change.
 
 ## Supported HSM vendors
 
+**Inclusion criterion.** A vendor is supported when a third party can verify offline, against a published vendor root and without a human witness or the involvement of the vendor or the financial entity, that an individual key was generated in the HSM and cannot be exported from it. The criterion follows from DORA (Regulation (EU) 2022/2554) Article 9(3)(d), under which ICT solutions and processes shall "ensure that data is protected from risks arising from data management, including poor administration, processing-related risks and human error" (Swedish text: "säkerställa att uppgifterna skyddas mot risker som uppstår från datahanteringen, inbegripet bristfällig förvaltning, processrelaterade risker och den mänskliga faktorn"), and from Article 9(4)(d), under which financial entities shall "implement policies and protocols for strong authentication mechanisms, based on relevant standards and dedicated control systems, and protection measures of cryptographic keys whereby data is encrypted based on results of approved data classification and ICT risk assessment processes". The same question is put to every vendor: can the requirement be shown to be met with the vendor's attestation? A vendor marked ❌ is one for which it cannot be shown; that is not a finding that the vendor, or an entity using it, fails DORA.
+
 | Vendor | Status | Request format |
 |--------|--------|----------------|
-| Securosys Primus | ✅ | `attestationData` (XML), `attestationSignature`, `attestationCertChain` |
-| Yubico YubiHSM 2 | ✅ | `attestationCertChain` |
-| Azure Managed HSM | ⚠️ | `attestationData` (JSON from `az keyvault key get-attestation`). Never valid: `AZURE_ATTRIBUTES_UNVERIFIED` is always added, because exportability and key origin cannot be read without a parser for the Marvell attribute encoding. Manufacturer-chain only; owner-chain (Microsoft) not yet implemented; Marvell trust anchor expired 2025-11-16 (deployer must refresh). |
-| Google Cloud HSM | ⚠️ | `attestationData`, `attestationCertChain`. The gatekeeper (1.5.0) never returns COMPLIANT for it (`GOOGLE_KEY_ORIGIN_UNVERIFIED`), so the gatekeeper step of `verifyAndIssue` always rejects it. Manufacturer-chain only; owner-chain (Google Hawksbill) not yet implemented; Marvell trust anchor expired 2025-11-16 (deployer must refresh). |
-| AWS CloudHSM | ❌ | Lacks per-key attestation |
+| Crypto4A QASM | ✅ | `attestationData` (the QASM attestation message, base64 of DER or the PEM `ATTESTATION MESSAGE` block). Every signature block (ECDSA P-384 and HSS) must verify over the claims and chain to the pinned C4A_RCA key; the key's `key-spki` must be the CSR key and the same object must carry private-key class, `key-is-confined`, `key-is-hardware-generated` and `key-never-extracted`, plus `qasm-certified-production` and `attestation-keys-are-unique`. Verified against the PKI Consortium's published message (`src/test/resources/vendor-fixtures/crypto4a`). |
+| Entrust nShield | ✅ | `attestationData` (the key attestation bundle JSON from `nfkmattest`). Warrant from the pinned KWARN-1 key to the module's KLF2 and ESN; module state signed by KLF2; security officer's key and module key bound by the world binding certificate; key generation certificate signed by the module's KML, for the CSR key; the generation-time ACL must not make the key recoverable (no security-officer-certified group, no recovery blob) nor allow export or key-wrapping permissions, and working blobs must be under the module key. Only `ModuleInformation` warrants are accepted. Entrust's two example bundles (`src/test/resources/vendor-fixtures/nshield`) carry `FieldUpgradeModuleInformation` warrants and are refused; below the warrant (reissued under a test root with their real KLF2 and ESN) the softcard-protected key verifies and the recoverable one is refused. |
+| Fortanix DSM | ✅ | `attestationData` (the key attestation JSON from DSM, `key_attestation_<key UUID>.json`). Authority certificate by PKIX with Fortanix's attestation policy under the pinned Fortanix root at the statement's signing time; the statement must be signed by it, attest the CSR key and carry `fortanixKeyGeneratedInDSM` and `fortanixKeyNeverExportable`. Verified against the sample in Fortanix's documentation (`src/test/resources/vendor-fixtures/fortanix`). |
+| Securosys Primus | ✅ | `attestationData` (XML), `attestationSignature`, `attestationCertChain`. Verified against the reference Primus HSM's attestation of an RSA-4096 key (`examples/securosys`, `RealAttestationFixtureTest`). |
+| Thales Luna | ✅ | `attestationData` (base64 of the DER Public Key Confirmation from `cmu getpkc`). PKC chain (Proof of Origin, Device Authentication, Hardware Origin, Mfg Integrity) under the pinned Chrysalis-ITS Root key; the Proof of Origin certificate's key must be the CSR key. Verified against Thales's own test vector (`src/test/resources/vendor-fixtures/thales-luna`). |
+| Yubico YubiHSM 2 | ✅ | `attestationCertChain`. Verified against the reference YubiHSM 2's attestation of an RSA-4096 key (`examples/yubico`, `RealAttestationFixtureTest`). |
+| Azure Managed HSM | ⚠️ | `attestationData`: the JSON from `az keyvault key get-attestation` (whole, or its `attributes` or `attributes.attestation` object). Marvell chain under the pinned Marvell roots, both attestations signed by the partition certificate, key attributes and RSA modulus read from the signed blobs (`MarvellAttestation`). Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
+| Google Cloud HSM | ⚠️ | `attestationData` (base64 of `attestation.dat`, gzip or decompressed), `attestationCertChain`. Marvell chain and Google owner chain (Hawksbill Root v1 prod), both pinned; key attributes and RSA modulus read from the signed blob. Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
+| Marvell LiquidSecurity | ⚠️ | `attestationData` (base64 of `attest.dat`, produced when the key is generated), `attestationCertChain` (partition and card certificates). Marvell chain under the pinned Marvell roots, key attributes and RSA modulus or EKCV read from the signed blob. Never valid until a real attestation confirms the format (`MARVELL_FORMAT_UNCONFIRMED`). |
+| AWS CloudHSM | ❌ | Excluded: the requirement in Article 9(3)(d) cannot be shown to be met for an individual key. AWS CloudHSM attests the identity of the HSM and the cluster, and only until the cluster is initialised (AWS CloudHSM User Guide, page `verify-hsm-identity`). That attestation does not cover individual keys, so it cannot be independently verified that a key was generated in the HSM and cannot be exported. |
 
 
 ### Yubico YubiHSM 2
@@ -334,11 +365,8 @@ gcloud kms keys versions get-certificate-chain 1 \
   --key mykey --keyring myring --location global \
   --output-file certs.pem
 
-# 2. Decompress attestation
-gunzip attestation.dat.gz
-
-# 3. Base64 encode for API calls
-base64 attestation.dat > attestation.b64
+# 2. Base64 encode for API calls (gzip or decompressed are both accepted)
+base64 -w0 attestation.dat.gz > attestation.b64
 ```
 
 Request:
@@ -347,6 +375,108 @@ Request:
   "hsmVendor": "GOOGLE",
   "attestationData": "<content from attestation.b64>",
   "attestationCertChain": ["<content from certs.pem>"],
+  ...
+}
+```
+
+### Marvell LiquidSecurity
+
+A physical Marvell LiquidSecurity HSM, the hardware behind Azure Managed HSM
+and Google Cloud HSM, signs a key attestation when the key is generated
+(Marvell: "When you create a key on a Marvell HSM, you can optionally request
+an attestation statement"). A financial entity that wants to show DORA
+Art. 9.3 d met requests it at generation and keeps `attest.dat` with the
+partition and card certificates.
+
+Request:
+```json
+{
+  "hsmVendor": "MARVELL",
+  "attestationData": "<base64 of attest.dat>",
+  "attestationCertChain": ["<partition certificate PEM>", "<card certificate PEM>"],
+  ...
+}
+```
+
+### Thales Luna
+
+A Luna HSM issues a Public Key Confirmation (PKC) for one of its key pairs
+with `cmu getpkc`. Thales: "A Luna HSM will issue confirmations only for
+private keys that were created by a Luna cryptographic module and that can
+never exist outside the security perimeter of a Luna HSM", and `cmu getpkc`
+"works with non-extractable keys only". The PKC has no attribute list; that
+the HSM issued it is the evidence.
+
+Request:
+```json
+{
+  "hsmVendor": "THALES",
+  "attestationData": "<base64 of the DER PKC (.p7b)>",
+  ...
+}
+```
+
+### Crypto4A QASM
+
+The QASM signs a set of claims about a key, each checked by the HSM before
+signing (Crypto4A, "Attestation using the QASM", C4A-302-0043). The
+verifier requires the CA/Browser Forum template's claims plus three that
+template leaves optional: `key-is-confined` (.2.7, "generated on the
+claiming QASM and can not be transferred in any way out of the QASM"),
+`key-is-hardware-generated` (.2.8) and `key-never-extracted` (.2.9).
+Generate it with, for example,
+`spa-key-man attest claim --private-key-is-on-hsm <private-key-uuid> --out message.pem`.
+
+Request:
+```json
+{
+  "hsmVendor": "CRYPTO4A",
+  "attestationData": "<message.pem, or base64 of its DER>",
+  ...
+}
+```
+
+### Fortanix DSM
+
+Fortanix DSM SaaS issues a key attestation statement, an X.509 structure
+signed by the cluster's Key Attestation Authority, with claims about the
+key: `fortanixKeyGeneratedInDSM` and `fortanixKeyNeverExportable` ("never
+exported from Fortanix DSM and may not be exported in the future. This
+prohibition also includes export in encrypted form"). Download it in the
+DSM UI (security object → DOWNLOAD CERTIFICATE) or with
+`POST /crypto/v1/keys/key_attestation`.
+
+Request:
+```json
+{
+  "hsmVendor": "FORTANIX",
+  "attestationData": "<key_attestation_<key UUID>.json>",
+  ...
+}
+```
+
+### Entrust nShield
+
+An nShield key attestation bundle (`nfkmattest`) carries the module's
+warrant, issued by Entrust under KWARN-1, the module state certificate, the
+security world's binding certificates and the key generation certificate,
+which records the key's generation-time ACL. The ACL decides whether the
+key is recoverable: a permission group certified by the security officer's
+key ("trump ops") or a MakeArchiveBlob action lets the Administrator Card
+Set holders load and use the key without its own protection, so such a key
+is refused (`NSHIELD_KEY_RECOVERABLE`). Only `ModuleInformation` warrants
+are accepted. Entrust states that `FieldUpgradeModuleInformation`
+certificates "depend on signatures made using legacy DSA-1024 keys,
+limiting their security", and NIST SP 800-131A no longer allows signatures
+to be made with DSA-1024; such a warrant is refused after its signatures
+have verified under KWARN-1. Key hashes are computed for RSA, DSA and ECDSA
+P-256 keys; other keys are refused.
+
+Request:
+```json
+{
+  "hsmVendor": "ENTRUST",
+  "attestationData": "<the bundle JSON>",
   ...
 }
 ```
@@ -375,7 +505,7 @@ vmware.vscode-boot-dev-pack
 
 ```bash
 mvn clean package
-java -jar target/hsm-1.5.0.jar
+java -jar target/hsm-1.6.0.jar
 ```
 
 **Swagger UI** is off in every profile except `dev` (`application-dev.yaml`); the
@@ -383,7 +513,7 @@ OpenAPI document and the UI have no run-time function and are kept out of the
 deployed surface. Locally:
 
 ```bash
-java -jar target/hsm-1.5.0.jar --spring.profiles.active=dev
+java -jar target/hsm-1.6.0.jar --spring.profiles.active=dev
 # http://localhost:8080/swagger-ui.html   http://localhost:8080/v3/api-docs
 ```
 
@@ -394,10 +524,10 @@ Production deployment requires, beyond the reference configuration shipped here:
 - **HSM manufacturer root CAs**:
   - **Securosys Primus** (`SecurosysVerifier`) — real vendor-issued root.
   - **Yubico YubiHSM** (`YubicoVerifier`) — real vendor-issued root, sourced from `https://developers.yubico.com/YubiHSM2/Concepts/yubihsm2-attest-ca-crt.pem`. SHA-256 fingerprint `09:4A:3A:C4:93:C2:BD:CD:65:A5:4B:DF:40:19:0F:52:BB:03:F7:15:63:97:A3:FC:69:D8:AA:9A:39:2F:B7:24`. Operators should re-verify the fingerprint against an authoritative Yubico source.
-  - **Azure Managed HSM** (`AzureHsmVerifier`) and **Google Cloud HSM** (`GoogleCloudHsmVerifier`) — pin the constant `ATTESTATION_TRUST_ANCHOR`, set to the genuine **Marvell/Cavium LiquidSecurity Root CA** (SHA-256 `97:57:57:F0:D7:66:40:E0:3D:14:76:0F:8F:C9:E3:A5:58:26:FA:78:07:B2:C3:92:F7:80:1A:95:BD:69:CC:28`) fetched from Marvell's official distribution at `marvell.com/.../liquid_security_certificate.zip` (the same anchor referenced by Google Cloud HSM's open-source verification code). Two limitations apply: **(i)** the bundled cert expired 2025-11-16; deployers must fetch the current Marvell root before relying on chain validation for attestations created after expiry. **(ii)** Google Cloud HSM's published Python sample (`verify_chains.py`, copyright 2021) verifies attestations against a **dual chain** anchored at BOTH the Marvell manufacturer root AND a cloud-vendor owner root (Google's "Hawksbill Root v1 prod" for Google Cloud HSM; Microsoft's equivalent for Azure Managed HSM). This reference build implements only the manufacturer chain; the owner chain is out of scope. Production deployment of either cloud path requires adding owner-chain validation per current cloud-vendor documentation.
+  - **Azure Managed HSM** (`AzureHsmVerifier`) and **Google Cloud HSM** (`GoogleCloudHsmVerifier`) share `MarvellAttestation`, which pins the two Marvell roots in Microsoft's validator (MIT, `Azure/azure-managed-hsm-key-attestation`): the LiquidSecurity root reissued 2024-07-25 to 2034-07-23 with the same key as the 2015 root pinned before (SHA-256 `23:01:43:DF:00:E0:B4:52:74:3E:06:8A:5B:3F:C0:8D:F8:F0:6C:EF:C4:85:4E:A6:27:AE:B7:EB:D7:0E:E2:F4`) and the LiquidSecurity 2 root (SHA-256 `17:64:4D:E0:D3:3B:C7:3B:2F:4E:F4:C2:0A:11:F6:C8:CC:1F:72:3A:4C:D8:3E:E6:00:36:1C:BB:24:D8:D2:E5`). Google's owner root "Hawksbill Root v1 prod" (SHA-256 `46:B5:FD:35:1D:56:A0:72:1C:A0:AF:CD:17:31:C0:F7:B7:4E:39:41:EB:81:8B:FD:0E:C3:6E:29:DF:0D:E0:95`, valid to 2030-01-01) is copied from Google's `verify_attestation_chains.py`. Microsoft's validator also checks a partition chain, but it starts from a self-signed certificate taken from the submitted bundle, so it is not used. Operators should re-verify the Marvell roots against `marvell.com/.../liquid_security_certificate.zip`.
   - All pinned trust anchors — placeholder or real — are loaded fail-closed: if any cannot be parsed, the Spring Boot application refuses to start.
-- **Signatory-rights registry**: replace the default `FailClosedSignatoryRightsVerifier` with a production `SignatoryRightsVerifier` adapter wired to an authoritative source (Swish agreement registry / Bolagsverket). Configure via `swish.signatory-rights.mode=<your-adapter>`. The fail-closed default will reject every SIGNING request until this is done.
-- **Marvell attestation blob parser**: the Azure / Google TLV blob parsers in this reference implementation rely on simplified assumptions about the Marvell attestation format that is NDA-restricted. The fail-closed behaviour at layout mismatch is correct, but a production deployment using the cloud-HSM paths must replace the parser with one aligned to the vendor specification.
+- **Signatory-rights registry**: replace the default `FailClosedSignatoryRightsVerifier` with a production `SignatoryRightsVerifier` adapter wired to an authoritative source (Swish agreement registry / Bolagsverket). Configure via `swish.signatory-rights.mode=<your-adapter>`. The fail-closed default will reject every request, SIGNING and TRANSPORT alike, until this is done.
+- **Marvell attestation format**: `MarvellAttestation` follows Marvell's "LiquidSecurity HSM - Software Key Attestation" page (response layout with key-1/key-2 offsets, attribute numbers including `OBJ_ATTR_MODULUS` `0x0120`, KCV `0x0173` and EKCV `0x1003`, and a parsed RSA key-pair example), Marvell's MIT-licensed `verify_pubkey.py`, Microsoft's MIT-licensed parser and validator (byte offsets, firmware 2.x/3.x signatures) and Google's sample (gzip, SHA-256 PKCS#1 v1.5, owner chain). Neither cloud vendor's tool binds the attestation to a public key; here the private key must match the CSR key through its modulus or EKCV (SHA-256 of the DER public key, as `verify_pubkey.py` computes it and Marvell's example confirms), directly or through the public-key object in the same signed blob. Until a real Azure or Google attestation is committed as a fixture and `MarvellAttestation.FORMAT_CONFIRMED_BY_REAL_SAMPLE` is set, both verifiers add `MARVELL_FORMAT_UNCONFIRMED` and never report a valid attestation.
 - **BankID XML-DSig integration test vectors**: the test suite builds its own PKI in-memory with BouncyCastle (see `src/test/java/.../testsupport/TestPki.java`) and asserts fail-closed behaviour. Before production, extend the suite with real BankID test vectors obtained from BankID's development environment.
 - **Reproducibility**: run `mvn -B test` — all unit tests exercise the real PKIX `CertPathValidator` against the pinned root certificate of each verifier with no mocks. See `PEER_REVIEW_GUIDE.md` for the full list of reproducible assertions; the substantive-fix history is preserved in the Git commit log.
 

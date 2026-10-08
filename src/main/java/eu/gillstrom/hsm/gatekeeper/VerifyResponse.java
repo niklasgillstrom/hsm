@@ -74,7 +74,10 @@ public class VerifyResponse {
     private KeyProperties keyProperties;
     private DoraCompliance doraCompliance;
 
+    private String customerOrganisationNumber;
+    private String customerSwishNumber;
     private String supplierIdentifier;
+    private String supplierNumber;
     private String supplierName;
     private String keyPurpose;
     private String countryCode;
@@ -113,11 +116,11 @@ public class VerifyResponse {
         private boolean article5_2b;
         /** Article 6(10) — entity remains fully responsible for verification. */
         private boolean article6_10;
-        /** Article 9(3)(c) — prevent impairment of authenticity and integrity. */
+        /** Article 9(3)(c) — ICT solutions and processes shall "prevent the lack of availability, the impairment of the authenticity and integrity, the breaches of confidentiality and the loss of data". */
         private boolean article9_3c;
-        /** Article 9(3)(d) — protection against poor administration. */
+        /** Article 9(3)(d) — ICT solutions and processes shall "ensure that data is protected from risks arising from data management, including poor administration, processing-related risks and human error". */
         private boolean article9_3d;
-        /** Article 9(4)(d) — strong authentication via dedicated control systems. */
+        /** Article 9(4)(d) — financial entities shall "implement policies and protocols for strong authentication mechanisms, based on relevant standards and dedicated control systems, and protection measures of cryptographic keys whereby data is encrypted based on results of approved data classification and ICT risk assessment processes". */
         private boolean article9_4d;
         /** Article 28(1)(a) — entity remains fully responsible. */
         private boolean article28_1a;

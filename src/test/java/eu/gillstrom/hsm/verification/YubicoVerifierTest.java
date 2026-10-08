@@ -1,28 +1,33 @@
 package eu.gillstrom.hsm.verification;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.bouncycastle.asn1.ASN1ObjectIdentifier;
 import org.bouncycastle.asn1.DERBitString;
 import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.cert.X509v3CertificateBuilder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
-import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.pkcs.PKCS10CertificationRequest;
 import org.junit.jupiter.api.Test;
 import eu.gillstrom.hsm.testsupport.TestPki;
 
+import java.io.InputStream;
+import java.io.StringReader;
 import java.math.BigInteger;
+import java.security.KeyFactory;
 import java.security.KeyPair;
+import java.security.PublicKey;
 import java.security.cert.X509Certificate;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Unit tests for {@link YubicoVerifier}. A throwaway PKI can never be rooted at
- * the pinned Yubico YubiHSM root CA, so the expected outcome is always
- * chain-valid=false.
- */
 class YubicoVerifierTest {
 
     @Test
@@ -48,37 +53,9 @@ class YubicoVerifierTest {
         YubicoVerifier.YubicoAttestationResult r =
                 verifier.verifyYubicoAttestation(chainPem, leafKp.getPublic());
 
-        // PKIX against the pinned Yubico root must reject a fake chain.
         assertThat(r.isChainValid()).isFalse();
         assertThat(r.getErrors()).anyMatch(e -> e.toLowerCase().contains("chain"));
-
-        // Public-key comparison still uses the leaf we submitted.
         assertThat(r.isPublicKeyMatch()).isTrue();
-
-        // Overall verdict is false since chain is not valid.
-        assertThat(r.isValid()).isFalse();
-    }
-
-    @Test
-    void missingCapabilitiesExtensionIsRejected() throws Exception {
-        YubicoVerifier verifier = new YubicoVerifier();
-
-        // A certificate with no Yubico attestation extensions at all — in
-        // particular no capabilities extension (1.3.6.1.4.1.41482.4.5). The
-        // result's exportability flags default to false, which reads as "not
-        // exportable"; an absent attribute must not be treated as a satisfied
-        // attribute.
-        KeyPair rootKp = TestPki.newRsaKeyPair(2048);
-        X509Certificate fakeRoot = TestPki.selfSignedCa(rootKp, "FAKE-YUBICO-ROOT");
-        KeyPair leafKp = TestPki.newRsaKeyPair(2048);
-        X509Certificate attestCert = TestPki.endEntity(
-                leafKp, "FAKE-YUBI-ATTEST", fakeRoot, rootKp.getPrivate());
-
-        YubicoVerifier.YubicoAttestationResult r = verifier.verifyYubicoAttestation(
-                List.of(TestPki.toPem(attestCert), TestPki.toPem(fakeRoot)), leafKp.getPublic());
-
-        assertThat(r.getErrors())
-                .anyMatch(e -> e.contains("Capabilities attestation extension missing"));
         assertThat(r.isValid()).isFalse();
     }
 
@@ -92,99 +69,187 @@ class YubicoVerifierTest {
         assertThat(r.isValid()).isFalse();
     }
 
-    @Test
-    void capabilitiesOfRealFixtureCarryNoExportFlags() {
-        YubicoVerifier.YubicoAttestationResult r = new YubicoVerifier.YubicoAttestationResult();
-        YubicoVerifier.parseCapabilities(bytes(0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x06, 0x60), r);
+    private static final String ORIGIN_OID = "1.3.6.1.4.1.41482.4.3";
+    private static final String CAPABILITIES_OID = "1.3.6.1.4.1.41482.4.5";
 
+    private static final byte[] REFERENCE_DEVICE_CAPABILITIES = {0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x06, 0x60};
+    private static final byte[] EXPORTABLE_UNDER_WRAP_CAPABILITY = {0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00};
+    private static final byte[] EXPORT_WRAPPED_CAPABILITY = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00};
+
+    @Test
+    void capabilitiesByteOrderReferenceDeviceBytesCarryNoExportFlag() {
+        YubicoVerifier.YubicoAttestationResult r = new YubicoVerifier.YubicoAttestationResult();
+        YubicoVerifier.applyCapabilities(REFERENCE_DEVICE_CAPABILITIES, r);
+
+        assertThat(YubicoVerifier.parseCapabilities(REFERENCE_DEVICE_CAPABILITIES))
+                .isEqualTo(0x0000000400000660L);
         assertThat(r.isExportableUnderWrap()).isFalse();
         assertThat(r.isCanExportWrapped()).isFalse();
         assertThat(r.isKeyExportable()).isFalse();
     }
 
     @Test
-    void capabilitiesBit16IsExportableUnderWrap() {
+    void capabilitiesByteOrderBit16IsExportableUnderWrap() {
         YubicoVerifier.YubicoAttestationResult r = new YubicoVerifier.YubicoAttestationResult();
-        YubicoVerifier.parseCapabilities(bytes(0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00), r);
+        YubicoVerifier.applyCapabilities(EXPORTABLE_UNDER_WRAP_CAPABILITY, r);
 
+        assertThat(YubicoVerifier.parseCapabilities(EXPORTABLE_UNDER_WRAP_CAPABILITY)).isEqualTo(1L << 16);
         assertThat(r.isExportableUnderWrap()).isTrue();
         assertThat(r.isCanExportWrapped()).isFalse();
     }
 
     @Test
-    void capabilitiesBit12IsExportWrapped() {
+    void capabilitiesByteOrderBit12IsExportWrapped() {
         YubicoVerifier.YubicoAttestationResult r = new YubicoVerifier.YubicoAttestationResult();
-        YubicoVerifier.parseCapabilities(bytes(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00), r);
+        YubicoVerifier.applyCapabilities(EXPORT_WRAPPED_CAPABILITY, r);
 
+        assertThat(YubicoVerifier.parseCapabilities(EXPORT_WRAPPED_CAPABILITY)).isEqualTo(1L << 12);
         assertThat(r.isCanExportWrapped()).isTrue();
         assertThat(r.isExportableUnderWrap()).isFalse();
     }
 
     @Test
-    void exportableUnderWrapInAttestationCertificateIsRejected() throws Exception {
-        YubicoVerifier verifier = new YubicoVerifier();
-        KeyPair leafKp = TestPki.newRsaKeyPair(2048);
-        X509Certificate attestCert = attestationCert(leafKp,
-                bytes(0x01), bytes(0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00));
+    void capabilitiesByteOrderExportableUnderWrapInAnAttestationCertificateIsRejected() throws Exception {
+        KeyPair kp = TestPki.newRsaKeyPair(2048);
+        X509Certificate cert = attestationCertificate(kp, new byte[] {0x01}, EXPORTABLE_UNDER_WRAP_CAPABILITY);
 
-        YubicoVerifier.YubicoAttestationResult r = verifier.verifyYubicoAttestation(
-                List.of(TestPki.toPem(attestCert)), leafKp.getPublic());
+        YubicoVerifier.YubicoAttestationResult r = new YubicoVerifier()
+                .verifyYubicoAttestation(List.of(TestPki.toPem(cert)), kp.getPublic());
 
         assertThat(r.isExportableUnderWrap()).isTrue();
+        assertThat(r.isKeyExportable()).isTrue();
         assertThat(r.getErrors()).anyMatch(e -> e.contains("export capabilities"));
         assertThat(r.isValid()).isFalse();
     }
 
     @Test
-    void originGeneratedIsAccepted() throws Exception {
-        YubicoVerifier verifier = new YubicoVerifier();
-        KeyPair leafKp = TestPki.newRsaKeyPair(2048);
-        X509Certificate attestCert = attestationCert(leafKp,
-                bytes(0x01), bytes(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00));
+    void capabilitiesByteOrderExportWrappedInAnAttestationCertificateIsRejected() throws Exception {
+        KeyPair kp = TestPki.newRsaKeyPair(2048);
+        X509Certificate cert = attestationCertificate(kp, new byte[] {0x01}, EXPORT_WRAPPED_CAPABILITY);
 
-        YubicoVerifier.YubicoAttestationResult r = verifier.verifyYubicoAttestation(
-                List.of(TestPki.toPem(attestCert)), leafKp.getPublic());
+        YubicoVerifier.YubicoAttestationResult r = new YubicoVerifier()
+                .verifyYubicoAttestation(List.of(TestPki.toPem(cert)), kp.getPublic());
 
-        assertThat(r.getKeyOrigin()).isEqualTo("generated");
-        assertThat(r.getErrors()).noneMatch(e -> e.contains("origin"));
+        assertThat(r.isCanExportWrapped()).isTrue();
+        assertThat(r.getErrors()).anyMatch(e -> e.contains("export capabilities"));
+        assertThat(r.isValid()).isFalse();
     }
 
     @Test
-    void originGeneratedAndImportedWrappedIsRejected() throws Exception {
-        YubicoVerifier verifier = new YubicoVerifier();
-        KeyPair leafKp = TestPki.newRsaKeyPair(2048);
-        X509Certificate attestCert = attestationCert(leafKp,
-                bytes(0x11), bytes(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00));
+    void originGeneratedIsAccepted() {
+        YubicoVerifier.YubicoAttestationResult r = new YubicoVerifier.YubicoAttestationResult();
+        YubicoVerifier.applyOrigin(new byte[] {0x01}, r);
+        YubicoVerifier.applyCapabilities(REFERENCE_DEVICE_CAPABILITIES, r);
+        YubicoVerifier.validateKeyAttributes(r);
 
-        YubicoVerifier.YubicoAttestationResult r = verifier.verifyYubicoAttestation(
-                List.of(TestPki.toPem(attestCert)), leafKp.getPublic());
+        assertThat(r.getKeyOrigin()).isEqualTo("generated");
+        assertThat(r.getErrors()).isEmpty();
+    }
+
+    @Test
+    void originGeneratedAndImportedWrappedIsRejected() {
+        YubicoVerifier.YubicoAttestationResult r = new YubicoVerifier.YubicoAttestationResult();
+        YubicoVerifier.applyOrigin(new byte[] {0x11}, r);
+        YubicoVerifier.applyCapabilities(REFERENCE_DEVICE_CAPABILITIES, r);
+        YubicoVerifier.validateKeyAttributes(r);
 
         assertThat(r.isGenerated()).isTrue();
         assertThat(r.isImportedWrapped()).isTrue();
         assertThat(r.getKeyOrigin()).isEqualTo("imported_wrapped");
         assertThat(r.getErrors()).anyMatch(e -> e.contains("origin: imported_wrapped"));
+    }
+
+    @Test
+    void originGeneratedAndImportedWrappedInAnAttestationCertificateIsRejected() throws Exception {
+        KeyPair kp = TestPki.newRsaKeyPair(2048);
+        X509Certificate cert = attestationCertificate(kp, new byte[] {0x11}, REFERENCE_DEVICE_CAPABILITIES);
+
+        YubicoVerifier.YubicoAttestationResult r = new YubicoVerifier()
+                .verifyYubicoAttestation(List.of(TestPki.toPem(cert)), kp.getPublic());
+
+        assertThat(r.getKeyOrigin()).isEqualTo("imported_wrapped");
+        assertThat(r.getErrors()).anyMatch(e -> e.contains("origin: imported_wrapped"));
         assertThat(r.isValid()).isFalse();
     }
 
-    private static byte[] bytes(int... values) {
-        byte[] out = new byte[values.length];
-        for (int i = 0; i < values.length; i++) {
-            out[i] = (byte) values[i];
+    @Test
+    void realYubiHsm2AttestationIsValidGeneratedAndNotExportable() throws Exception {
+        JsonNode fixture;
+        try (InputStream in = YubicoVerifierTest.class.getResourceAsStream("/fixtures/yubico/request.json")) {
+            fixture = new ObjectMapper().readTree(in);
         }
-        return out;
+        List<String> chain = new ArrayList<>();
+        for (JsonNode pem : fixture.get("attestationCertChain")) {
+            chain.add(pem.asText());
+        }
+
+        YubicoVerifier.YubicoAttestationResult r = new YubicoVerifier()
+                .verifyYubicoAttestation(chain, csrPublicKey(fixture.get("csr").asText()));
+
+        assertThat(r.getErrors()).isEmpty();
+        assertThat(r.isChainValid()).isTrue();
+        assertThat(r.isPublicKeyMatch()).isTrue();
+        assertThat(r.getKeyOrigin()).isEqualTo("generated");
+        assertThat(r.isKeyExportable()).isFalse();
+        assertThat(r.getDeviceSerial()).isEqualTo("20783176");
+        assertThat(r.isValid()).isTrue();
     }
 
-    private static X509Certificate attestationCert(KeyPair subjectKp, byte[] origin, byte[] capabilities)
+    @Test
+    void missingCapabilitiesExtensionIsRejected() throws Exception {
+        // Origin present, capabilities extension absent. The exportability
+        // flags default to false, which reads as "not exportable"; an absent
+        // attribute must not count as a satisfied one.
+        KeyPair kp = TestPki.newRsaKeyPair(2048);
+        X509Certificate cert = attestationCertificate(kp, new byte[] {0x01}, null);
+
+        YubicoVerifier.YubicoAttestationResult r = new YubicoVerifier()
+                .verifyYubicoAttestation(List.of(TestPki.toPem(cert)), kp.getPublic());
+
+        assertThat(r.getErrors()).anyMatch(e -> e.startsWith("YUBICO_CAPABILITIES_MISSING"));
+        assertThat(r.isValid()).isFalse();
+    }
+
+    @Test
+    void attestationExtensionsMarkedCriticalAreRead() throws Exception {
+        // Yubico marks the extensions non-critical, but a certificate that
+        // marks them critical must not have them skipped.
+        KeyPair kp = TestPki.newRsaKeyPair(2048);
+        X509Certificate cert = attestationCertificate(kp, new byte[] {0x01}, EXPORTABLE_UNDER_WRAP_CAPABILITY, true);
+
+        YubicoVerifier.YubicoAttestationResult r = new YubicoVerifier()
+                .verifyYubicoAttestation(List.of(TestPki.toPem(cert)), kp.getPublic());
+
+        assertThat(r.isExportableUnderWrap()).isTrue();
+        assertThat(r.getErrors()).anyMatch(e -> e.contains("export capabilities"));
+    }
+
+    private static X509Certificate attestationCertificate(KeyPair kp, byte[] origin, byte[] capabilities)
             throws Exception {
-        KeyPair issuerKp = TestPki.newRsaKeyPair(2048);
+        return attestationCertificate(kp, origin, capabilities, false);
+    }
+
+    /** {@code capabilities == null} leaves the capabilities extension out. */
+    private static X509Certificate attestationCertificate(KeyPair kp, byte[] origin, byte[] capabilities,
+            boolean critical) throws Exception {
+        X500Name subject = new X500Name("CN=YubiHSM Attestation id:0x0001");
         long now = System.currentTimeMillis();
-        JcaX509v3CertificateBuilder b = new JcaX509v3CertificateBuilder(
-                new X500Name("CN=FAKE-YUBICO-DEVICE"), BigInteger.valueOf(now),
-                new Date(now - 60_000L), new Date(now + 3600_000L),
-                new X500Name("CN=FAKE-YUBI-ATTEST"), subjectKp.getPublic());
-        b.addExtension(new ASN1ObjectIdentifier("1.3.6.1.4.1.41482.4.3"), false, new DERBitString(origin));
-        b.addExtension(new ASN1ObjectIdentifier("1.3.6.1.4.1.41482.4.5"), false, new DERBitString(capabilities));
-        ContentSigner cs = new JcaContentSignerBuilder("SHA256withRSA").build(issuerKp.getPrivate());
-        return new JcaX509CertificateConverter().getCertificate(b.build(cs));
+        X509v3CertificateBuilder b = new JcaX509v3CertificateBuilder(
+                subject, BigInteger.valueOf(now), new Date(now - 60_000L), new Date(now + 3600_000L),
+                subject, kp.getPublic());
+        b.addExtension(new ASN1ObjectIdentifier(ORIGIN_OID), critical, new DERBitString(origin));
+        if (capabilities != null) {
+            b.addExtension(new ASN1ObjectIdentifier(CAPABILITIES_OID), critical, new DERBitString(capabilities));
+        }
+        return new JcaX509CertificateConverter().getCertificate(
+                b.build(new JcaContentSignerBuilder("SHA256withRSA").build(kp.getPrivate())));
+    }
+
+    private static PublicKey csrPublicKey(String csrPem) throws Exception {
+        try (PEMParser parser = new PEMParser(new StringReader(csrPem))) {
+            PKCS10CertificationRequest csr = (PKCS10CertificationRequest) parser.readObject();
+            return KeyFactory.getInstance("RSA")
+                    .generatePublic(new X509EncodedKeySpec(csr.getSubjectPublicKeyInfo().getEncoded()));
+        }
     }
 }

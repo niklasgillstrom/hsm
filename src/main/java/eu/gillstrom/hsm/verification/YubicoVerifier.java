@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import eu.gillstrom.hsm.model.HsmVendor;
 
 import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.PublicKey;
 import java.security.cert.CertPath;
@@ -22,6 +23,11 @@ import java.util.Set;
 
 @Component
 public class YubicoVerifier implements HsmAttestationVerifier {
+
+    /** Text before the first '(' contains no ')', then the serial up to the first ')'. */
+    private static final java.util.regex.Pattern DEVICE_SERIAL =
+            java.util.regex.Pattern.compile("^[^()]+\\(([^)]*)\\)");
+
 
     private static final Logger log = LoggerFactory.getLogger(YubicoVerifier.class);
 
@@ -87,7 +93,7 @@ public class YubicoVerifier implements HsmAttestationVerifier {
         try {
             CertificateFactory cf = CertificateFactory.getInstance("X.509");
             ByteArrayInputStream is = new ByteArrayInputStream(
-                    YUBICO_ROOT_CA.trim().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    YUBICO_ROOT_CA.trim().getBytes(StandardCharsets.UTF_8));
             this.rootCa = (X509Certificate) cf.generateCertificate(is);
         } catch (Exception e) {
             // Fail-closed: if the Yubico root CA cannot be loaded, the verifier cannot
@@ -160,20 +166,22 @@ public class YubicoVerifier implements HsmAttestationVerifier {
             if (chain.length > 1) {
                 String cn = chain[1].getSubjectX500Principal().getName();
                 if (cn.contains("Attestation")) {
-                    // Format: YubiHSM Attestation (XXXXXXXX)
-                    int start = cn.indexOf('(');
-                    int end = cn.indexOf(')');
-                    if (start > 0 && end > start) {
-                        result.setDeviceSerial(cn.substring(start + 1, end));
+                    // Format: YubiHSM Attestation (XXXXXXXX): the text between the
+                    // first '(' and the first ')', when a ')' does not come first.
+                    java.util.regex.Matcher serial = DEVICE_SERIAL.matcher(cn);
+                    if (serial.find()) {
+                        result.setDeviceSerial(serial.group(1));
                     }
                 }
             }
 
             result.setValid(result.isChainValid() && result.isPublicKeyMatch()
-                    && result.isGenerated() && !result.isKeyExportable()
+                    && result.isGenerated() && !result.isImported() && !result.isImportedWrapped()
+                    && !result.isKeyExportable()
                     && result.getErrors().isEmpty());
 
         } catch (Exception e) {
+            log.warn("Yubico attestation verification threw: {}", e.getMessage(), e);
             result.addError("Verification error: " + e.getMessage());
         }
 
@@ -190,7 +198,7 @@ public class YubicoVerifier implements HsmAttestationVerifier {
                 pem = "-----BEGIN CERTIFICATE-----\n" + pem + "\n-----END CERTIFICATE-----";
             }
             chain[i] = (X509Certificate) cf.generateCertificate(
-                    new ByteArrayInputStream(pem.getBytes()));
+                    new ByteArrayInputStream(pem.getBytes(StandardCharsets.UTF_8)));
         }
         return chain;
     }
@@ -238,10 +246,9 @@ public class YubicoVerifier implements HsmAttestationVerifier {
         try {
             // Read both critical and non-critical extension OIDs. Yubico ships
             // the attestation extensions as non-critical, but a certificate
-            // that marks them critical would previously have been skipped
-            // entirely — and a skipped capabilities extension left
-            // exportability reported as "not exportable" without anything
-            // having been parsed.
+            // that marks them critical was previously skipped entirely, and a
+            // skipped capabilities extension left exportability reported as
+            // "not exportable" without anything having been parsed.
             java.util.Set<String> oids = new java.util.LinkedHashSet<>();
             if (cert.getCriticalExtensionOIDs() != null) {
                 oids.addAll(cert.getCriticalExtensionOIDs());
@@ -273,18 +280,12 @@ public class YubicoVerifier implements HsmAttestationVerifier {
                     }
                     case ORIGIN_OID -> {
                         ASN1BitString bs = ASN1BitString.getInstance(content);
-                        byte[] originBytes = bs.getBytes();
-                        if (originBytes.length > 0) {
-                            int originBits = originBytes[0] & 0xFF;
-                            result.setGenerated((originBits & 0x01) != 0);
-                            result.setImported((originBits & 0x02) != 0);
-                            result.setImportedWrapped((originBits & 0x10) != 0);
-                        }
+                        applyOrigin(bs.getBytes(), result);
                     }
                     case CAPABILITIES_OID -> {
                         capabilitiesSeen = true;
                         ASN1BitString bs = ASN1BitString.getInstance(content);
-                        parseCapabilities(bs.getBytes(), result);
+                        applyCapabilities(bs.getBytes(), result);
                     }
                     case LABEL_OID -> {
                         ASN1UTF8String label = ASN1UTF8String.getInstance(content);
@@ -297,52 +298,61 @@ public class YubicoVerifier implements HsmAttestationVerifier {
                 }
             }
 
-            // Fail closed on a missing capabilities extension. Without it,
-            // nothing has been parsed about exportability, yet the result's
-            // flags default to false — which reads downstream as "key cannot
-            // be exported". An absent attestation attribute is not evidence
-            // that the attribute is satisfied.
+            // Fail closed on a missing capabilities extension: an absent
+            // attestation attribute is not evidence that it is satisfied.
             if (!capabilitiesSeen) {
                 result.addError("YUBICO_CAPABILITIES_MISSING: Capabilities attestation extension missing ("
                         + CAPABILITIES_OID + ") — key exportability is unverified");
             }
-
-            // Validate key origin and exportability
-            if (!result.isGenerated() || result.isImported() || result.isImportedWrapped()) {
-                result.addError("Key was not generated on HSM and kept there (origin: "
-                        + result.getKeyOrigin() + ")");
-            }
-            if (result.isExportableUnderWrap() || result.isCanExportWrapped()) {
-                result.addError("Key has export capabilities - not allowed for signing keys");
-            }
+            validateKeyAttributes(result);
 
         } catch (Exception e) {
+            log.warn("Failed to parse Yubico attestation extensions: {}", e.getMessage());
             result.addError("Failed to parse attestation extensions: " + e.getMessage());
         }
     }
 
-    static void parseCapabilities(byte[] capBytes, YubicoAttestationResult result) {
+    static long parseCapabilities(byte[] capBytes) {
         long caps = 0;
         for (byte b : capBytes) {
             caps = (caps << 8) | (b & 0xFF);
         }
+        return caps;
+    }
+
+    static void applyCapabilities(byte[] capBytes, YubicoAttestationResult result) {
+        long caps = parseCapabilities(capBytes);
         result.setCanExportWrapped((caps & (1L << EXPORT_WRAPPED_BIT)) != 0);
         result.setExportableUnderWrap((caps & (1L << EXPORTABLE_UNDER_WRAP_BIT)) != 0);
+    }
+
+    static void applyOrigin(byte[] originBytes, YubicoAttestationResult result) {
+        if (originBytes.length > 0) {
+            int originBits = originBytes[0] & 0xFF;
+            result.setGenerated((originBits & 0x01) != 0);
+            result.setImported((originBits & 0x02) != 0);
+            result.setImportedWrapped((originBits & 0x10) != 0);
+        }
+    }
+
+    static void validateKeyAttributes(YubicoAttestationResult result) {
+        if (!result.isGenerated() || result.isImported() || result.isImportedWrapped()) {
+            result.addError("Key was not generated on this HSM without import (origin: "
+                    + result.getKeyOrigin() + ")");
+        }
+        if (result.isExportableUnderWrap() || result.isCanExportWrapped()) {
+            result.addError("Key has export capabilities - not allowed for signing keys");
+        }
     }
 
     @Override
     public boolean verifyChain(X509Certificate attestationCert, X509Certificate[] chain) {
         if (chain == null || chain.length == 0)
             return false;
-        try {
-            X509Certificate[] fullChain = new X509Certificate[chain.length + 1];
-            fullChain[0] = attestationCert;
-            System.arraycopy(chain, 0, fullChain, 1, chain.length);
-            return verifyCertChainToRoot(fullChain);
-        } catch (Exception e) {
-            log.warn("Yubico verifyChain failed: {}", e.getMessage());
-            return false;
-        }
+        X509Certificate[] fullChain = new X509Certificate[chain.length + 1];
+        fullChain[0] = attestationCert;
+        System.arraycopy(chain, 0, fullChain, 1, chain.length);
+        return verifyCertChainToRoot(fullChain);
     }
 
     @Override

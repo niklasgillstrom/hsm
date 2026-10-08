@@ -26,8 +26,10 @@ import java.util.List;
  * the operating NCA, in Sweden Finansinspektionen).
  *
  * <p>Note: the wire format submits the <em>public key</em>, not a CSR.
- * Subject DN, BankID material, organisation numbers and other surrounding
- * KYC metadata are intentionally excluded — the gatekeeper certifies the
+ * Subject DN, BankID material and other surrounding KYC metadata are
+ * excluded. The parties are sent and echoed in the receipt: the customer's
+ * organisation and Swish numbers, and, when the request comes from a
+ * technical supplier, the supplier's organisation number and 987 number — the gatekeeper certifies the
  * cryptographic HSM-attestation property only, not the financial entity's
  * own KYC checks.
  */
@@ -38,7 +40,7 @@ public class VerifyRequest {
     /** PEM-encoded attested public key. NOT a CSR. */
     private String publicKey;
 
-    /** {@code YUBICO}, {@code SECUROSYS}, {@code AZURE}, or {@code GOOGLE}. */
+    /** {@code YUBICO}, {@code SECUROSYS}, {@code AZURE}, {@code GOOGLE}, {@code MARVELL}, {@code THALES}, {@code CRYPTO4A}, {@code FORTANIX} or {@code ENTRUST}. */
     private String hsmVendor;
 
     /** Vendor-specific attestation blob (base64). Null for Yubico. */
@@ -50,10 +52,22 @@ public class VerifyRequest {
     /** PEM-encoded chain (excluding manufacturer root, which the gatekeeper pins). */
     private List<String> attestationCertChain;
 
-    /** Optional: orgnr of the technical supplier whose key is being attested. */
+    /** Organisation number of the customer the certificate is for. */
+    private String customerOrganisationNumber;
+
+    /** The customer's Swish number (123…). */
+    private String customerSwishNumber;
+
+    /**
+     * Organisation number of the technical supplier that called with its
+     * transport certificate (987…); null when the customer calls itself.
+     */
     private String supplierIdentifier;
 
-    /** Optional: human-readable supplier name. */
+    /** The technical supplier's number (987…); null without a technical supplier. */
+    private String supplierNumber;
+
+    /** The technical supplier's name, from BankID when it is the relying party; otherwise null. */
     private String supplierName;
 
     /** Optional: free-text purpose tag, e.g. {@code "Swish payment signing"}. */

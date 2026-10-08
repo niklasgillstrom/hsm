@@ -1,10 +1,8 @@
 package eu.gillstrom.hsm.service;
 
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.operator.jcajce.JcaContentVerifierProviderBuilder;
 import org.bouncycastle.pkcs.PKCS10CertificationRequest;
-import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,20 +22,27 @@ import eu.gillstrom.hsm.model.HsmVendor;
 import eu.gillstrom.hsm.model.IssuanceResponse;
 import eu.gillstrom.hsm.model.VerificationResponse;
 import eu.gillstrom.hsm.model.VerificationResponse.CertificateType;
+import eu.gillstrom.hsm.util.Csrs;
 import eu.gillstrom.hsm.util.Fingerprints;
 import eu.gillstrom.hsm.verification.AzureHsmVerifier;
 import eu.gillstrom.hsm.verification.GoogleCloudHsmVerifier;
+import eu.gillstrom.hsm.verification.MarvellHsmVerifier;
+import eu.gillstrom.hsm.verification.ThalesLunaVerifier;
+import eu.gillstrom.hsm.verification.Crypto4AVerifier;
+import eu.gillstrom.hsm.verification.FortanixVerifier;
+import eu.gillstrom.hsm.verification.NShieldVerifier;
 import eu.gillstrom.hsm.verification.SecurosysVerifier;
 import eu.gillstrom.hsm.verification.YubicoVerifier;
 
-import java.io.StringReader;
 import java.io.StringWriter;
 import java.security.PublicKey;
+import java.security.cert.X509Certificate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class AttestationService {
@@ -60,10 +65,18 @@ public class AttestationService {
     private final YubicoVerifier yubicoVerifier;
     private final AzureHsmVerifier azureVerifier;
     private final GoogleCloudHsmVerifier googleVerifier;
+    private final MarvellHsmVerifier marvellVerifier;
+    private final ThalesLunaVerifier thalesVerifier;
+    private final Crypto4AVerifier crypto4aVerifier;
+    private final FortanixVerifier fortanixVerifier;
+    private final NShieldVerifier nshieldVerifier;
     private final SignatoryRightsVerifier signatoryRightsVerifier;
     private final GatekeeperClient gatekeeperClient;
     private final ReceiptVerifier receiptVerifier;
     private final IssuanceClient issuanceClient;
+    private final KeyPolicy keyPolicy;
+    private final BankIdConsentPolicy consentPolicy;
+    private final CallerPolicy callerPolicy;
     private final String gatekeeperCountryCode;
 
     public AttestationService(BankIdService bankIdService,
@@ -71,20 +84,36 @@ public class AttestationService {
             YubicoVerifier yubicoVerifier,
             AzureHsmVerifier azureVerifier,
             GoogleCloudHsmVerifier googleVerifier,
+            MarvellHsmVerifier marvellVerifier,
+            ThalesLunaVerifier thalesVerifier,
+            Crypto4AVerifier crypto4aVerifier,
+            FortanixVerifier fortanixVerifier,
+            NShieldVerifier nshieldVerifier,
             SignatoryRightsVerifier signatoryRightsVerifier,
             GatekeeperClient gatekeeperClient,
             ReceiptVerifier receiptVerifier,
             IssuanceClient issuanceClient,
+            KeyPolicy keyPolicy,
+            BankIdConsentPolicy consentPolicy,
+            CallerPolicy callerPolicy,
             @Value("${swish.gatekeeper.country-code:SE}") String gatekeeperCountryCode) {
         this.bankIdService = bankIdService;
         this.securosysVerifier = securosysVerifier;
         this.yubicoVerifier = yubicoVerifier;
         this.azureVerifier = azureVerifier;
         this.googleVerifier = googleVerifier;
+        this.marvellVerifier = marvellVerifier;
+        this.thalesVerifier = thalesVerifier;
+        this.crypto4aVerifier = crypto4aVerifier;
+        this.fortanixVerifier = fortanixVerifier;
+        this.nshieldVerifier = nshieldVerifier;
         this.signatoryRightsVerifier = signatoryRightsVerifier;
         this.gatekeeperClient = gatekeeperClient;
         this.receiptVerifier = receiptVerifier;
         this.issuanceClient = issuanceClient;
+        this.keyPolicy = keyPolicy;
+        this.consentPolicy = consentPolicy;
+        this.callerPolicy = callerPolicy;
         this.gatekeeperCountryCode = gatekeeperCountryCode;
     }
 
@@ -117,17 +146,33 @@ public class AttestationService {
      * proceeds directly.
      */
     public IssuanceResponse verifyAndIssue(CertificateRequest request) {
+        return verifyAndIssue(request, null);
+    }
+
+    /**
+     * @param caller the transport certificate the request was made with (mTLS),
+     *               or null; checked by {@link CallerPolicy}
+     */
+    public IssuanceResponse verifyAndIssue(CertificateRequest request, X509Certificate caller) {
         // Phase 1: local verification.
-        VerificationResponse local = verify(request);
+        VerificationResponse local = verify(request, caller);
         if (!local.isValid()) {
             return IssuanceResponse.rejectedLocal(local);
         }
 
         // TRANSPORT: not subject to HSM-attestation supervision; skip gatekeeper.
+        // Reported under its own stage so that an issuance no gatekeeper took
+        // part in is never counted as a supervised, confirmed one. A TRANSPORT
+        // certificate used to sign a payment is refused at settlement, where
+        // only gatekeeper-registered certificates are accepted.
         if (local.getCertificateType() != CertificateType.SIGNING) {
+            if (!bankIdService.consume(request.getBankIdSignatureResponse(), local.getBankIdSignatureTime(),
+                    mandateCount(local))) {
+                return IssuanceResponse.rejectedBankIdAlreadyUsed(local, null);
+            }
             try {
                 IssuedCertificate cert = issuanceClient.issue(request, null);
-                return IssuanceResponse.issuedAndConfirmed(local, null, cert, null);
+                return IssuanceResponse.issuedTransportNotSupervised(local, cert);
             } catch (IssuanceException e) {
                 log.warn("Issuance failed for TRANSPORT request: {}", e.getMessage());
                 return IssuanceResponse.rejectedIssuance(local, null, e.getMessage());
@@ -135,7 +180,7 @@ public class AttestationService {
         }
 
         // Phase 2: gatekeeper verify.
-        VerifyRequest verifyRequest = buildVerifyRequest(request, local, gatekeeperCountryCode);
+        VerifyRequest verifyRequest = buildVerifyRequest(request, local, gatekeeperCountryCode, caller);
         VerifyResponse verifyReceipt;
         try {
             verifyReceipt = gatekeeperClient.verify(verifyRequest);
@@ -174,6 +219,27 @@ public class AttestationService {
                             + " but this request carries " + local.getCsrPublicKeyFingerprint());
         }
 
+        // An authentic receipt for this key is still not necessarily a receipt
+        // for this request: it has to be current and carry back what this
+        // request sent.
+        String receiptMismatch = receiptMismatch(verifyReceipt, verifyRequest, java.time.Instant.now());
+        if (receiptMismatch != null) {
+            log.warn("Gatekeeper receipt does not match this request (verificationId={}): {}",
+                    verifyReceipt.getVerificationId(), receiptMismatch);
+            return IssuanceResponse.rejectedReceiptMismatch(local, verifyReceipt,
+                    "RECEIPT_MISMATCH: " + receiptMismatch);
+        }
+
+        // The BankID signature authorises as many issuances as its mandate
+        // states. One is consumed only now, so that a gatekeeper failure above
+        // does not use it up; a request beyond the count that got this far is
+        // refused, and its gatekeeper verification closed as not issued.
+        if (!bankIdService.consume(request.getBankIdSignatureResponse(), local.getBankIdSignatureTime(),
+                    mandateCount(local))) {
+            safeConfirmNonIssuance(verifyReceipt, "BANKID_SIGNATURE_ALREADY_USED", request);
+            return IssuanceResponse.rejectedBankIdAlreadyUsed(local, verifyReceipt);
+        }
+
         // Phase 3: issuance.
         IssuedCertificate cert;
         try {
@@ -204,7 +270,8 @@ public class AttestationService {
         // A confirm response that arrives without exception is not by itself a
         // closed loop. It has to be the confirm for this verification, and it
         // has to say the registry reached the non-anomalous issued state.
-        String confirmAnomaly = confirmAnomaly(verifyReceipt, confirmResponse);
+        String confirmAnomaly = confirmAnomaly(verifyReceipt, confirmResponse,
+                local.getCsrPublicKeyFingerprint());
         if (confirmAnomaly != null) {
             log.warn("Gatekeeper confirm did not close the supervisory loop "
                     + "(verificationId={}, issuanceId={}): {}",
@@ -223,10 +290,16 @@ public class AttestationService {
      *         {@code VERIFIED_ISSUED_AND_CONFIRMED} stage: the certificate
      *         exists but the registry entry that legitimises it does not.
      */
-    private static String confirmAnomaly(VerifyResponse verifyReceipt,
-            IssuanceConfirmResponse confirmResponse) {
+    private String confirmAnomaly(VerifyResponse verifyReceipt,
+            IssuanceConfirmResponse confirmResponse, String csrFingerprint) {
         if (confirmResponse == null) {
             return "gatekeeper returned no confirm response";
+        }
+        // The response must be signed by a trusted gatekeeper key, exactly as
+        // the receipt is. Unsigned, anyone able to answer the confirm call
+        // could report the loop as closed.
+        if (!receiptVerifier.verifyConfirmation(confirmResponse)) {
+            return "confirm response signature did not verify against a trusted gatekeeper key";
         }
         String expectedId = verifyReceipt.getVerificationId();
         String actualId = confirmResponse.getVerificationId();
@@ -248,8 +321,15 @@ public class AttestationService {
         if (!confirmResponse.isLoopClosed()) {
             return "gatekeeper reported loopClosed=false";
         }
-        if (confirmResponse.getPublicKeyMatch() != null && !confirmResponse.getPublicKeyMatch()) {
-            return "gatekeeper reported publicKeyMatch=false for the issued certificate";
+        // For an issued certificate the match must be stated, and the key the
+        // gatekeeper read from the certificate must be the key of this CSR.
+        if (!Boolean.TRUE.equals(confirmResponse.getPublicKeyMatch())) {
+            return "gatekeeper did not report publicKeyMatch=true for the issued certificate (got "
+                    + confirmResponse.getPublicKeyMatch() + ")";
+        }
+        if (!Fingerprints.equal(confirmResponse.getActualPublicKeyFingerprint(), csrFingerprint)) {
+            return "gatekeeper confirmed public key " + confirmResponse.getActualPublicKeyFingerprint()
+                    + " but this request carries " + csrFingerprint;
         }
         return null;
     }
@@ -257,24 +337,97 @@ public class AttestationService {
     /**
      * Build the gatekeeper verify request from the customer-facing
      * {@link CertificateRequest}. The wire format submits the attested
-     * <em>public key</em> rather than the CSR — surrounding KYC metadata
-     * (BankID, organisation/Swish numbers, subject DN) is intentionally
-     * excluded; it is not part of the gatekeeper's mandate.
+     * <em>public key</em> rather than the CSR, with the customer (organisation
+     * and Swish numbers) and, when a technical supplier called, the supplier
+     * (organisation number and 987 number from its transport certificate).
+     * The BankID material and the subject DN are not sent.
      */
+    /** How old, or how far ahead, a gatekeeper receipt may be when it arrives. */
+    static final java.time.Duration RECEIPT_MAX_SKEW = java.time.Duration.ofMinutes(5);
+
+    /**
+     * Null when the receipt was issued within {@link #RECEIPT_MAX_SKEW} of
+     * {@code now}, echoes the country, customer, supplier, key purpose and HSM vendor
+     * this request sent, and reports key properties consistent with
+     * compliance; otherwise what does not match.
+     */
+    static String receiptMismatch(VerifyResponse receipt, VerifyRequest sent, java.time.Instant now) {
+        java.time.Instant at = receipt.getVerificationTimestamp();
+        if (at == null) {
+            return "the receipt has no verificationTimestamp";
+        }
+        if (at.isBefore(now.minus(RECEIPT_MAX_SKEW)) || at.isAfter(now.plus(RECEIPT_MAX_SKEW))) {
+            return "verificationTimestamp " + at + " is more than " + RECEIPT_MAX_SKEW + " from now";
+        }
+        if (!equalsIgnoreCase(receipt.getCountryCode(), sent.getCountryCode())) {
+            return "countryCode " + receipt.getCountryCode() + " is not " + sent.getCountryCode();
+        }
+        String[][] parties = {
+            {"customerOrganisationNumber", receipt.getCustomerOrganisationNumber(), sent.getCustomerOrganisationNumber()},
+            {"customerSwishNumber", receipt.getCustomerSwishNumber(), sent.getCustomerSwishNumber()},
+            {"supplierIdentifier", receipt.getSupplierIdentifier(), sent.getSupplierIdentifier()},
+            {"supplierNumber", receipt.getSupplierNumber(), sent.getSupplierNumber()}};
+        for (String[] p : parties) {
+            if (!java.util.Objects.equals(p[1], p[2])) {
+                return p[0] + " " + p[1] + " is not " + p[2];
+            }
+        }
+        if (!java.util.Objects.equals(receipt.getKeyPurpose(), sent.getKeyPurpose())) {
+            return "keyPurpose " + receipt.getKeyPurpose() + " is not " + sent.getKeyPurpose();
+        }
+        // gatekeeper reports the vendor's name ("Yubico"), its mock the token ("YUBICO").
+        String vendorName = vendorName(sent.getHsmVendor());
+        if (!equalsIgnoreCase(receipt.getHsmVendor(), sent.getHsmVendor())
+                && !equalsIgnoreCase(receipt.getHsmVendor(), vendorName)) {
+            return "hsmVendor " + receipt.getHsmVendor() + " is not " + sent.getHsmVendor();
+        }
+        VerifyResponse.KeyProperties k = receipt.getKeyProperties();
+        if (k == null || !k.isGeneratedOnDevice() || k.isExportable() || !k.isAttestationChainValid()
+                || !k.isPublicKeyMatchesAttestation()) {
+            return "keyProperties " + k + " contradict compliance";
+        }
+        return null;
+    }
+
+    private static boolean equalsIgnoreCase(String a, String b) {
+        return a != null && a.equalsIgnoreCase(b);
+    }
+
+    private static String vendorName(String token) {
+        try {
+            return HsmVendor.valueOf(token.toUpperCase(java.util.Locale.ROOT)).getVendorName();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** @param local the result of {@link #verify}, which is never null */
     private static VerifyRequest buildVerifyRequest(CertificateRequest request,
-            VerificationResponse local, String countryCode) {
+            VerificationResponse local, String countryCode, X509Certificate caller) {
         try {
             PublicKey pk = parseCsrPublicKey(request.getCsr());
             String publicKeyPem = toPublicKeyPem(pk);
+            // The technical supplier is whoever called with a 987 transport
+            // certificate (CallerPolicy has checked it is the BankID relying
+            // party). A customer that calls with its own 123 certificate has
+            // no technical supplier, and the supplier fields stay empty.
+            java.util.Optional<CallerPolicy.Supplier> supplier = CallerPolicy.supplierOf(caller);
+            String supplierName = supplier.isPresent()
+                    && CallerPolicy.sameOrganisationNumber(local.getBankIdRelyingPartyOrgNumber(),
+                            supplier.get().organisationNumber())
+                    ? local.getBankIdRelyingPartyName() : null;
             return VerifyRequest.builder()
                     .publicKey(publicKeyPem)
                     .hsmVendor(request.getHsmVendor())
                     .attestationData(request.getAttestationData())
                     .attestationSignature(request.getAttestationSignature())
                     .attestationCertChain(request.getAttestationCertChain())
-                    .supplierIdentifier(request.getOrganisationNumber())
-                    .supplierName(local == null ? null : local.getBankIdRelyingPartyName())
-                    .keyPurpose(local == null ? null : ("Swish " + local.getCertificateType()))
+                    .customerOrganisationNumber(request.getOrganisationNumber())
+                    .customerSwishNumber(request.getSwishNumber())
+                    .supplierIdentifier(supplier.map(CallerPolicy.Supplier::organisationNumber).orElse(null))
+                    .supplierNumber(supplier.map(CallerPolicy.Supplier::number).orElse(null))
+                    .supplierName(supplierName)
+                    .keyPurpose("Swish " + local.getCertificateType())
                     .countryCode(countryCode)
                     .build();
         } catch (Exception e) {
@@ -332,15 +485,13 @@ public class AttestationService {
     }
 
     private static PublicKey parseCsrPublicKey(String csrPem) throws Exception {
-        String pem = csrPem.trim();
-        if (!pem.contains("BEGIN")) {
-            pem = "-----BEGIN CERTIFICATE REQUEST-----\n" + csrPem
-                    + "\n-----END CERTIFICATE REQUEST-----";
-        }
-        try (PEMParser parser = new PEMParser(new StringReader(pem))) {
-            PKCS10CertificationRequest csr = (PKCS10CertificationRequest) parser.readObject();
-            return new JcaPKCS10CertificationRequest(csr).getPublicKey();
-        }
+        return Csrs.publicKey(csrPem);
+    }
+
+    /** The number of certificates the verified signature's mandate authorises (0 if none). */
+    private static int mandateCount(VerificationResponse local) {
+        return BankIdService.parseMandate(local.getBankIdUsrNonVisibleData())
+                .map(BankIdService.Mandate::count).orElse(0);
     }
 
     private static String toPublicKeyPem(PublicKey publicKey) {
@@ -352,7 +503,16 @@ public class AttestationService {
         return w.toString();
     }
 
+    /** As {@link #verify(CertificateRequest, X509Certificate)} for a request made without a transport certificate. */
     public VerificationResponse verify(CertificateRequest request) {
+        return verify(request, null);
+    }
+
+    /**
+     * @param caller the transport certificate the request was made with (mTLS),
+     *               or null; checked by {@link CallerPolicy}
+     */
+    public VerificationResponse verify(CertificateRequest request, X509Certificate caller) {
         List<String> errors = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
 
@@ -381,7 +541,6 @@ public class AttestationService {
         // Parse CSR
         PublicKey csrPublicKey;
         String keyAlgorithm;
-        byte[] csrDer;
         try {
             PKCS10CertificationRequest csr = parseCsr(request.getCsr());
             // Proof of possession. A PKCS#10 request is self-signed by the
@@ -398,11 +557,13 @@ public class AttestationService {
             }
             csrPublicKey = extractPublicKey(csr);
             keyAlgorithm = csrPublicKey.getAlgorithm();
-            // Hash the DER exactly as submitted rather than a re-encoding of
-            // the parsed structure: the client computes its half of the binding
-            // over the bytes it sends, and a re-encoding could in principle
-            // differ from them.
-            csrDer = csrDerBytes(request.getCsr());
+            // Key and signature-algorithm policy. Without it a CSR with an
+            // RSA-512 key, a weak curve or an MD5 signature was issued for.
+            Optional<String> policyViolation = keyPolicy.violation(csr, csrPublicKey);
+            if (policyViolation.isPresent()) {
+                errors.add("KEY_POLICY_VIOLATION: " + policyViolation.get());
+                return buildErrorResponse(errors, certType);
+            }
         } catch (Exception e) {
             errors.add("Invalid CSR: " + e.getMessage());
             return buildErrorResponse(errors, certType);
@@ -417,20 +578,35 @@ public class AttestationService {
             errors.add("BankID verification failed: " + bankIdResult.getError());
         }
 
-        // Bind the authorisation act to THIS request. The BankID signature
-        // proves that a person signed something; the canonical binding string
-        // in usrNonVisibleData is what proves they signed this organisation
-        // number, this Swish number and this CSR. Without the comparison a
-        // signature legitimately collected for one request can be presented
-        // with another request's CSR.
-        String expectedBinding = BankIdService.expectedBinding(
-                request.getOrganisationNumber(), request.getSwishNumber(), csrDer);
-        if (!BankIdService.isBoundToRequest(bankIdResult.getUsrNonVisibleData(), expectedBinding)) {
+        // Bind the authorisation act to this request. The BankID signature
+        // proves that a person signed something; the mandate in
+        // usrNonVisibleData says which organisation number and Swish number it
+        // covers and how many certificates it authorises. The signature is
+        // collected once for N calls and each CSR is created just before its own
+        // call, so no CSR can be bound here; the count is consumed one issuance
+        // at a time in verifyAndIssue.
+        Optional<BankIdService.Mandate> mandate = BankIdService.parseMandate(bankIdResult.getUsrNonVisibleData());
+        if (mandate.isEmpty() || !mandate.get().covers(request.getOrganisationNumber(), request.getSwishNumber())) {
             errors.add("BANKID_NOT_BOUND_TO_REQUEST: usrNonVisibleData in the BankID signature is "
-                    + "missing or does not equal the canonical binding for this request "
+                    + "missing or is not a mandate for this organisation number and Swish number "
                     + "(expected format " + BankIdService.BINDING_VERSION
-                    + ";org=<organisationNumber>;swish=<swishNumber>;csr-sha256=<hex>)");
+                    + ";org=<organisationNumber>;swish=<swishNumber>;count=<1.." + BankIdService.MAX_MANDATE_COUNT + ">)");
         }
+
+        // What the signatory saw, and who asked: the binding above sits in data
+        // the signatory never sees, so the relying party and the visible text
+        // are checked as well (BankIdConsentPolicy).
+        if (bankIdResult.isValid()) {
+            errors.addAll(consentPolicy.violations(bankIdResult.getRelyingPartyOrgNumber(),
+                    bankIdResult.getUsrVisibleData(), request.getOrganisationNumber(),
+                    request.getSwishNumber(), mandate.map(BankIdService.Mandate::count).orElse(0)));
+        }
+
+        // Who called: the transport certificate of the TLS connection must be
+        // the company's own (123) or that of the technical supplier that is the
+        // BankID relying party (987).
+        errors.addAll(callerPolicy.violations(caller, request.getOrganisationNumber(),
+                request.getSwishNumber(), bankIdResult.getRelyingPartyOrgNumber()));
 
         SignatoryRightsVerifier.Result signatoryResult = signatoryRightsVerifier.check(
                 bankIdResult.getPersonalNumber(),
@@ -438,18 +614,14 @@ public class AttestationService {
                 request.getSwishNumber());
         boolean authorizedSignatory = signatoryResult.isAuthorised();
         if (!authorizedSignatory) {
-            // Fail-closed: any non-AUTHORISED outcome (UNAUTHORISED or UNKNOWN)
-            // is a hard error for a signing-certificate request. Fall back to
-            // warning-only for transport-certificate requests where signatory
-            // authorisation is not strictly required.
-            String message = "Signatory rights not confirmed (status="
+            // Fail-closed for every certificate type: any non-AUTHORISED outcome
+            // (UNAUTHORISED or UNKNOWN) is a hard error. A TRANSPORT certificate
+            // carries no HSM-attestation requirement, but it is still issued in
+            // the organisation's name and gives access to the Swish API for its
+            // Swish number, so it needs the same signatory authorisation.
+            errors.add("Signatory rights not confirmed (status="
                     + signatoryResult.status() + "): "
-                    + (signatoryResult.reason() != null ? signatoryResult.reason() : "no reason given");
-            if (certType == CertificateType.SIGNING) {
-                errors.add(message);
-            } else {
-                warnings.add(message);
-            }
+                    + (signatoryResult.reason() != null ? signatoryResult.reason() : "no reason given"));
         }
 
         // HSM attestation
@@ -479,7 +651,7 @@ public class AttestationService {
                         if (result.getKeySize() != null) {
                             hsmModel += " (" + result.getAlgorithm() + " " + result.getKeySize() + ")";
                         }
-                        keyOrigin = "generated"; // Securosys: never_extractable=true means generated
+                        keyOrigin = result.getKeyOrigin() != null ? result.getKeyOrigin() : "unverified";
                         keyExportable = result.isExtractable();
                         if (!result.isValid()) {
                             errors.addAll(result.getErrors());
@@ -529,6 +701,81 @@ public class AttestationService {
                         }
                         keyOrigin = result.getKeyOrigin();
                         keyExportable = result.isExtractable();
+                        if (!result.isValid()) {
+                            errors.addAll(result.getErrors());
+                        }
+                        if (result.isPublicKeyMatch()) {
+                            attestedFingerprint = csrFingerprint;
+                        }
+                    }
+                    case MARVELL -> {
+                        var result = verifyMarvell(request, csrPublicKey);
+                        publicKeyMatch = result.isPublicKeyMatch();
+                        attestationChainValid = result.isChainValid();
+                        hsmSerial = result.getPartitionSerial();
+                        hsmModel = "Marvell LiquidSecurity";
+                        keyOrigin = result.getKeyOrigin();
+                        keyExportable = result.isExtractable();
+                        if (!result.isValid()) {
+                            errors.addAll(result.getErrors());
+                        }
+                        if (result.isPublicKeyMatch()) {
+                            attestedFingerprint = csrFingerprint;
+                        }
+                    }
+                    case THALES -> {
+                        var result = verifyThales(request, csrPublicKey);
+                        publicKeyMatch = result.isPublicKeyMatch();
+                        attestationChainValid = result.isChainValid();
+                        hsmSerial = result.getHsmSerial();
+                        hsmModel = "Thales Luna";
+                        keyOrigin = result.getKeyOrigin();
+                        keyExportable = result.isExportable();
+                        if (!result.isValid()) {
+                            errors.addAll(result.getErrors());
+                        }
+                        if (result.isPublicKeyMatch()) {
+                            attestedFingerprint = csrFingerprint;
+                        }
+                    }
+                    case CRYPTO4A -> {
+                        var result = verifyCrypto4A(request, csrPublicKey);
+                        publicKeyMatch = result.isPublicKeyMatch();
+                        attestationChainValid = result.isChainValid();
+                        hsmSerial = result.getHsmSerial();
+                        hsmModel = "Crypto4A QASM";
+                        keyOrigin = result.getKeyOrigin();
+                        keyExportable = result.isExportable();
+                        if (!result.isValid()) {
+                            errors.addAll(result.getErrors());
+                        }
+                        if (result.isPublicKeyMatch()) {
+                            attestedFingerprint = csrFingerprint;
+                        }
+                    }
+                    case FORTANIX -> {
+                        var result = verifyFortanix(request, csrPublicKey);
+                        publicKeyMatch = result.isPublicKeyMatch();
+                        attestationChainValid = result.isChainValid();
+                        hsmSerial = result.getKeyId();
+                        hsmModel = "Fortanix DSM";
+                        keyOrigin = result.getKeyOrigin();
+                        keyExportable = result.isExportable();
+                        if (!result.isValid()) {
+                            errors.addAll(result.getErrors());
+                        }
+                        if (result.isPublicKeyMatch()) {
+                            attestedFingerprint = csrFingerprint;
+                        }
+                    }
+                    case ENTRUST -> {
+                        var result = verifyNShield(request, csrPublicKey);
+                        publicKeyMatch = result.isPublicKeyMatch();
+                        attestationChainValid = result.isChainValid();
+                        hsmSerial = result.getEsn();
+                        hsmModel = "Entrust nShield";
+                        keyOrigin = result.getKeyOrigin();
+                        keyExportable = result.isExportable();
                         if (!result.isValid()) {
                             errors.addAll(result.getErrors());
                         }
@@ -637,7 +884,7 @@ public class AttestationService {
         if (request.getAttestationData() == null || request.getAttestationData().isBlank()) {
             var result = new GoogleCloudHsmVerifier.GoogleAttestationResult();
             result.addError(
-                    "attestationData (base64 of decompressed attestation.dat) is required for Google Cloud HSM");
+                    "attestationData (base64 of attestation.dat) is required for Google Cloud HSM");
             return result;
         }
 
@@ -647,14 +894,77 @@ public class AttestationService {
                 csrPublicKey);
     }
 
+    private MarvellHsmVerifier.MarvellAttestationResult verifyMarvell(
+            CertificateRequest request, PublicKey csrPublicKey) {
+
+        if (request.getAttestationData() == null || request.getAttestationData().isBlank()) {
+            var result = new MarvellHsmVerifier.MarvellAttestationResult();
+            result.addError("attestationData (base64 of attest.dat) is required for Marvell LiquidSecurity");
+            return result;
+        }
+
+        return marvellVerifier.verifyMarvellAttestation(
+                request.getAttestationData(),
+                request.getAttestationCertChain(),
+                csrPublicKey);
+    }
+
+    private ThalesLunaVerifier.ThalesLunaResult verifyThales(
+            CertificateRequest request, PublicKey csrPublicKey) {
+
+        if (request.getAttestationData() == null || request.getAttestationData().isBlank()) {
+            var result = new ThalesLunaVerifier.ThalesLunaResult();
+            result.addError("attestationData (base64 of the PKC from cmu getpkc) is required for Thales Luna");
+            return result;
+        }
+
+        return thalesVerifier.verifyLunaAttestation(request.getAttestationData(), csrPublicKey);
+    }
+
+    private Crypto4AVerifier.Crypto4AResult verifyCrypto4A(
+            CertificateRequest request, PublicKey csrPublicKey) {
+
+        if (request.getAttestationData() == null || request.getAttestationData().isBlank()) {
+            var result = new Crypto4AVerifier.Crypto4AResult();
+            result.addError("attestationData (the QASM attestation message, base64 or PEM) is required for Crypto4A");
+            return result;
+        }
+
+        return crypto4aVerifier.verifyCrypto4AAttestation(request.getAttestationData(), csrPublicKey);
+    }
+
+    private FortanixVerifier.FortanixResult verifyFortanix(
+            CertificateRequest request, PublicKey csrPublicKey) {
+
+        if (request.getAttestationData() == null || request.getAttestationData().isBlank()) {
+            var result = new FortanixVerifier.FortanixResult();
+            result.addError("attestationData (the DSM key attestation JSON) is required for Fortanix");
+            return result;
+        }
+
+        return fortanixVerifier.verifyFortanixAttestation(request.getAttestationData(), csrPublicKey);
+    }
+
+    private NShieldVerifier.NShieldResult verifyNShield(
+            CertificateRequest request, PublicKey csrPublicKey) {
+
+        if (request.getAttestationData() == null || request.getAttestationData().isBlank()) {
+            var result = new NShieldVerifier.NShieldResult();
+            result.addError("attestationData (the nShield key attestation bundle JSON) is required for Entrust");
+            return result;
+        }
+
+        return nshieldVerifier.verifyNShieldAttestation(request.getAttestationData(), csrPublicKey);
+    }
+
     private HsmVendor detectVendor(String specified) {
         if (specified == null || specified.isBlank())
             return null;
         try {
             return HsmVendor.valueOf(specified.toUpperCase());
         } catch (IllegalArgumentException e) {
-            // Unknown vendor token — callers handle a null return by falling
-            // through to auto-detection or rejecting the request; no stack
+            // Unknown vendor token — the caller rejects the request ("hsmVendor
+            // is required for signing certificates"); no stack
             // trace is useful here, but a structured debug log helps operators
             // see what token clients are sending.
             log.debug("detectVendor: unknown HSM vendor token '{}'", specified);
@@ -669,29 +979,7 @@ public class AttestationService {
     }
 
     private PKCS10CertificationRequest parseCsr(String csrInput) throws Exception {
-        String pem = csrInput.trim();
-        if (!pem.contains("BEGIN")) {
-            pem = "-----BEGIN CERTIFICATE REQUEST-----\n" + csrInput + "\n-----END CERTIFICATE REQUEST-----";
-        }
-        try (PEMParser parser = new PEMParser(new StringReader(pem))) {
-            return (PKCS10CertificationRequest) parser.readObject();
-        }
-    }
-
-    /**
-     * The DER encoding of the submitted CSR: the PEM armour and all whitespace
-     * stripped, then base64-decoded. This is the byte sequence the
-     * {@code csr-sha256} component of the BankID request binding is computed
-     * over, on both sides.
-     */
-    private static byte[] csrDerBytes(String csrInput) {
-        String body = csrInput
-                .replace("-----BEGIN CERTIFICATE REQUEST-----", "")
-                .replace("-----END CERTIFICATE REQUEST-----", "")
-                .replace("-----BEGIN NEW CERTIFICATE REQUEST-----", "")
-                .replace("-----END NEW CERTIFICATE REQUEST-----", "")
-                .replaceAll("\\s+", "");
-        return Base64.getDecoder().decode(body);
+        return Csrs.parse(csrInput);
     }
 
     /**
@@ -714,11 +1002,7 @@ public class AttestationService {
     }
 
     private PublicKey extractPublicKey(PKCS10CertificationRequest csr) throws Exception {
-        var pkInfo = csr.getSubjectPublicKeyInfo();
-        var keySpec = new java.security.spec.X509EncodedKeySpec(pkInfo.getEncoded());
-        String algorithm = pkInfo.getAlgorithm().getAlgorithm().getId();
-        String keyAlg = algorithm.startsWith("1.2.840.10045") ? "EC" : "RSA";
-        return java.security.KeyFactory.getInstance(keyAlg).generatePublic(keySpec);
+        return Csrs.publicKey(csr);
     }
 
     /**

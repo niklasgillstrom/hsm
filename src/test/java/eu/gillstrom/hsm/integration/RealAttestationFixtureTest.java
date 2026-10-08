@@ -161,6 +161,9 @@ class RealAttestationFixtureTest {
         assertThat(r.isAlwaysSensitive())
                 .as("attested key must be always_sensitive")
                 .isTrue();
+        assertThat(r.getKeyOrigin())
+                .as("creation attribute of the attested key")
+                .isEqualTo(exp.get("keyOrigin").asText());
         assertThat(r.isValid())
                 .as("overall attestation result")
                 .isEqualTo(exp.get("valid").asBoolean());

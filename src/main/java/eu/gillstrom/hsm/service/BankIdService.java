@@ -22,7 +22,6 @@ import org.w3c.dom.NodeList;
 import javax.naming.InvalidNameException;
 import javax.naming.ldap.LdapName;
 import javax.naming.ldap.Rdn;
-import javax.xml.XMLConstants;
 import javax.xml.crypto.KeySelector;
 import javax.xml.crypto.dsig.XMLSignature;
 import javax.xml.crypto.dsig.XMLSignatureFactory;
@@ -38,6 +37,8 @@ import java.security.cert.PKIXParameters;
 import java.security.cert.TrustAnchor;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
+import java.time.Duration;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
@@ -159,11 +160,35 @@ public class BankIdService {
      */
     private static final String OCSP_SIGNING_EKU_OID = "1.3.6.1.5.5.7.3.9";
 
+    /**
+     * Clock skew tolerated when a time in the OCSP response is compared with
+     * now: {@code producedAt} or {@code thisUpdate} further ahead than this is
+     * refused.
+     */
+    static final Duration CLOCK_SKEW = Duration.ofMinutes(5);
+
     private final Set<TrustAnchor> bankIdTrustAnchors;
+    private final Clock clock;
+    private final Duration maxSignatureAge;
+
+    /**
+     * BankID signatures used for issuance, keyed by SHA-256 of the signature
+     * as submitted: how many issuances each has had, and the time after which
+     * it is too old to verify anyway and is dropped. Held in memory: a deployment with several
+     * instances needs a shared store to refuse a replay across them.
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, Use> consumed =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     @Autowired
-    public BankIdService(@Value("${swish.bankid.allow-test-root:false}") boolean allowTestRoot) {
-        this(pinnedTrustAnchors(allowTestRoot));
+    public BankIdService(@Value("${swish.bankid.allow-test-root:false}") boolean allowTestRoot,
+            @Value("${swish.bankid.max-signature-age:PT15M}") Duration maxSignatureAge) {
+        this(pinnedTrustAnchors(allowTestRoot), Clock.systemUTC(), maxSignatureAge);
+    }
+
+    /** As the Spring constructor, with the default maximum signature age of 15 minutes. */
+    public BankIdService(boolean allowTestRoot) {
+        this(allowTestRoot, Duration.ofMinutes(15));
     }
 
     /**
@@ -174,7 +199,61 @@ public class BankIdService {
      * reach this one.
      */
     BankIdService(Set<TrustAnchor> trustAnchors) {
+        this(trustAnchors, Clock.systemUTC(), Duration.ofMinutes(15));
+    }
+
+    BankIdService(Set<TrustAnchor> trustAnchors, Clock clock, Duration maxSignatureAge) {
+        if (maxSignatureAge == null || maxSignatureAge.isNegative() || maxSignatureAge.isZero()) {
+            throw new IllegalArgumentException("swish.bankid.max-signature-age must be positive");
+        }
         this.bankIdTrustAnchors = Set.copyOf(trustAnchors);
+        this.clock = clock;
+        this.maxSignatureAge = maxSignatureAge;
+    }
+
+    /**
+     * Records that a verified BankID signature has been used for one issuance
+     * under its mandate.
+     *
+     * <p>A signature authorises at most {@code count} certificates, the number
+     * its mandate states and the signatory saw; each issuance uses one. An
+     * entry is kept until {@code producedAt} plus the maximum signature age and
+     * the clock skew, after which {@link #verify} refuses the signature
+     * anyway.</p>
+     *
+     * @return false if all {@code count} issuances were already used
+     */
+    public boolean consume(String signatureBase64, Instant producedAt, int count) {
+        Instant now = clock.instant();
+        consumed.values().removeIf(use -> use.expiry().isBefore(now));
+        Instant expiry = (producedAt == null ? now : producedAt).plus(maxSignatureAge).plus(CLOCK_SKEW);
+        boolean[] granted = {false};
+        consumed.compute(sha256Hex(signatureBase64), (k, use) -> {
+            int used = use == null ? 0 : use.used();
+            if (used >= count) {
+                return use;
+            }
+            granted[0] = true;
+            return new Use(used + 1, expiry);
+        });
+        return granted[0];
+    }
+
+    private record Use(int used, Instant expiry) {
+    }
+
+    /** For tests: how many consumed signatures are remembered. */
+    int usedSignatureCount() {
+        return consumed.size();
+    }
+
+    private static String sha256Hex(String s) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest((s == null ? "" : s).getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 unavailable on this JVM", e);
+        }
     }
 
     static Set<TrustAnchor> pinnedTrustAnchors(boolean allowTestRoot) {
@@ -211,67 +290,73 @@ public class BankIdService {
     // ------------------------------------------------------------------
 
     /**
-     * Version marker of the canonical request-binding format carried in
-     * {@code usrNonVisibleData}. Bump this if the field set or the separator
-     * ever changes; a relying party that does not understand the version must
-     * reject the signature rather than guess.
+     * Version marker of the mandate format carried in {@code usrNonVisibleData}.
+     * Bump this if the field set or the separator ever changes; a relying party
+     * that does not understand the version must reject the signature rather
+     * than guess.
      */
-    public static final String BINDING_VERSION = "hsm-csr:v1";
+    public static final String BINDING_VERSION = "hsm-mandate:v1";
+
+    /** The largest number of certificates one signature can authorise. */
+    public static final int MAX_MANDATE_COUNT = 99;
+
+    private static final java.util.regex.Pattern MANDATE = java.util.regex.Pattern.compile(
+            "hsm-mandate:v1;org=(\\d{10}|\\d{12});swish=(\\d{10});count=([1-9]\\d?)");
 
     /**
-     * The canonical string that the BankID signature's {@code usrNonVisibleData}
-     * must carry, so that the authorisation act is bound to <em>this</em>
-     * certificate request and not merely to some request.
+     * The mandate a BankID signature carries in {@code usrNonVisibleData}: the
+     * organisation and Swish number it covers and how many certificates it
+     * authorises.
      *
      * <p>Format (single line, no padding, no trailing separator):</p>
      *
-     * <pre>hsm-csr:v1;org=&lt;organisationNumber&gt;;swish=&lt;swishNumber&gt;;csr-sha256=&lt;hex&gt;</pre>
+     * <pre>hsm-mandate:v1;org=&lt;organisationNumber&gt;;swish=&lt;swishNumber&gt;;count=&lt;1..99&gt;</pre>
      *
-     * <p>where {@code hex} is lowercase hex of SHA-256 over the CSR's DER
-     * encoding (the bytes inside the PEM armour, not the base64 text). The
-     * relying party sends this string, UTF-8 encoded and then base64 encoded,
-     * as {@code usrNonVisibleData} in the BankID sign order; BankID returns it
-     * base64-encoded inside the signed {@code bankIdSignedData} element, so it
-     * is covered by the XML-DSig Reference and cannot be substituted after the
-     * fact.</p>
+     * <p>The relying party sends this string, UTF-8 encoded and then base64
+     * encoded, as {@code userNonVisibleData} in the BankID sign order; BankID
+     * returns it inside the signed {@code bankIdSignedData} element, so it is
+     * covered by the XML-DSig Reference and cannot be substituted after the
+     * fact. The text the signatory sees must state the same count, as
+     * "(N)" (BankIdConsentPolicy).</p>
      *
-     * <p>Without this binding a BankID signature legitimately collected for one
-     * certificate request can be replayed against another request carrying a
-     * different CSR — the signature verifies, the personal number is genuine,
-     * and nothing in the payload contradicts the swap.</p>
+     * <p>The signature is collected once for all N calls, and the technical
+     * supplier creates each CSR just before its own call. A CSR therefore
+     * cannot be bound here (the earlier {@code hsm-csr:v1} bound one CSR to
+     * each signature). What limits the signature instead is
+     * the count, consumed one issuance at a time ({@link #consume}), its age
+     * ({@code swish.bankid.max-signature-age}), the relying party
+     * (BankIdConsentPolicy) and the caller's transport certificate
+     * (CallerPolicy).</p>
      */
-    public static String expectedBinding(String organisationNumber, String swishNumber, byte[] csrDer) {
-        if (csrDer == null) {
-            throw new IllegalArgumentException("csrDer must not be null");
-        }
-        return BINDING_VERSION
-                + ";org=" + (organisationNumber == null ? "" : organisationNumber)
-                + ";swish=" + (swishNumber == null ? "" : swishNumber)
-                + ";csr-sha256=" + csrSha256Hex(csrDer);
-    }
+    public record Mandate(String organisationNumber, String swishNumber, int count) {
 
-    /** Lowercase hex of SHA-256 over the CSR's DER encoding. */
-    public static String csrSha256Hex(byte[] csrDer) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(csrDer));
-        } catch (Exception e) {
-            // SHA-256 is JCA-mandatory; unreachable in practice.
-            throw new IllegalStateException("SHA-256 unavailable on this JVM", e);
+        /** The canonical string for this mandate. */
+        public String canonical() {
+            return BINDING_VERSION + ";org=" + organisationNumber + ";swish=" + swishNumber
+                    + ";count=" + count;
+        }
+
+        /** Whether the mandate covers this request's organisation and Swish number. */
+        public boolean covers(String requestOrganisationNumber, String requestSwishNumber) {
+            return organisationNumber.equals(requestOrganisationNumber)
+                    && swishNumber.equals(requestSwishNumber);
         }
     }
 
     /**
-     * Constant-time comparison of the decoded {@code usrNonVisibleData} against
-     * the expected binding string. A missing or blank {@code usrNonVisibleData}
-     * is never a match — fail-closed.
+     * Reads the mandate from the decoded {@code usrNonVisibleData}. Anything
+     * other than exactly the canonical format, including the earlier
+     * {@code hsm-csr} versions, is no mandate: fail-closed.
      */
-    public static boolean isBoundToRequest(String usrNonVisibleData, String expectedBinding) {
-        if (usrNonVisibleData == null || usrNonVisibleData.isBlank() || expectedBinding == null) {
-            return false;
+    public static java.util.Optional<Mandate> parseMandate(String usrNonVisibleData) {
+        if (usrNonVisibleData == null) {
+            return java.util.Optional.empty();
         }
-        return MessageDigest.isEqual(
-                usrNonVisibleData.trim().getBytes(StandardCharsets.UTF_8),
-                expectedBinding.getBytes(StandardCharsets.UTF_8));
+        java.util.regex.Matcher m = MANDATE.matcher(usrNonVisibleData);
+        if (!m.matches()) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(new Mandate(m.group(1), m.group(2), Integer.parseInt(m.group(3))));
     }
 
     /**
@@ -287,8 +372,8 @@ public class BankIdService {
      *       than merely attached to a legitimate certificate chain by an
      *       attacker.</li>
      *   <li>Parse the certificate chain and validate it cryptographically via
-     *       {@link CertPathValidator} against the user certificate's own root,
-     *       using the standard PKIX algorithm. Revocation checking is disabled
+     *       {@link CertPathValidator} against the pinned BankID roots (never a
+     *       root the caller supplied), using the standard PKIX algorithm. Revocation checking is disabled
      *       here (consistent with the chosen validation model); higher layers
      *       should rely on the OCSP response cross-check (step&nbsp;4) for
      *       certificate-status information.</li>
@@ -303,10 +388,10 @@ public class BankIdService {
      *   <li>Extract identity data from the signed payload.</li>
      * </ol>
      *
-     * <p>Callers that need the authorisation act bound to a specific
-     * certificate request must additionally compare
-     * {@link BankIdResult#getUsrNonVisibleData()} against
-     * {@link #expectedBinding(String, String, byte[])}; this method verifies
+     * <p>Callers that need the authorisation act bound to a request must
+     * additionally read the mandate from
+     * {@link BankIdResult#getUsrNonVisibleData()} ({@link #parseMandate});
+     * this method verifies
      * that the payload was signed, not what the payload says.</p>
      */
     public BankIdResult verify(String signatureBase64, String ocspBase64) {
@@ -395,10 +480,11 @@ public class BankIdService {
             BankIdResult result = new BankIdResult();
             result.setValid(signatureValid && chainValid);
             result.setSignatureValid(signatureValid);
+            // chainValid is true here: without a validated chain issuerOf() is
+            // null, checkOcsp reports OCSP_RESPONDER_CHAIN_INVALID and the
+            // method has already returned.
             if (dsigError != null) {
                 result.setError(dsigError);
-            } else if (!chainValid) {
-                result.setError("Certificate chain validation failed");
             }
             result.setPersonalNumber(personalNumber);
             result.setName(name);
@@ -422,17 +508,21 @@ public class BankIdService {
     }
 
     /**
-     * Parse XML with XXE and related external-entity attacks disabled.
+     * Parse XML with XXE and external-entity protection.
+     *
+     * <p>Any DOCTYPE is a fatal error ({@code disallow-doctype-decl}; a parser
+     * that does not support the feature makes {@code setFeature} throw, so the
+     * signature is refused). Without a DOCTYPE there is no DTD, no external
+     * DTD to load, no general or parameter entity to declare or expand, and no
+     * entity reference other than the five predefined ones, so the separate
+     * entity and external-DTD switches have nothing left to act on. XInclude is
+     * off by default ({@link DocumentBuilderFactory#isXIncludeAware()}).</p>
      */
     private Document parseXmlSafely(byte[] xmlBytes) throws Exception {
-        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
-        dbf.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        // newDefaultInstance() is always the JDK's built-in parser, whatever else
+        // is on the classpath; it applies the jdk.xml.* resource limits by default.
+        DocumentBuilderFactory dbf = DocumentBuilderFactory.newDefaultInstance();
         dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
-        dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
-        dbf.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-        dbf.setXIncludeAware(false);
-        dbf.setExpandEntityReferences(false);
         // BankID signatures rely on element IDs for the Reference URI lookup.
         dbf.setNamespaceAware(true);
         DocumentBuilder db = dbf.newDocumentBuilder();
@@ -445,7 +535,7 @@ public class BankIdService {
      * @return {@code null} if the signature verifies; otherwise a description
      *         of the verification failure.
      */
-    private String verifyXmlSignature(Document doc, X509Certificate userCert) {
+    static String verifyXmlSignature(Document doc, X509Certificate userCert) {
         try {
             NodeList nl = doc.getElementsByTagNameNS(XMLSignature.XMLNS, "Signature");
             if (nl.getLength() == 0) {
@@ -506,14 +596,12 @@ public class BankIdService {
      *         well-formed payload; &gt;1 indicates ambiguity the caller must
      *         reject).
      */
-    private int markBankIdSignedDataId(Document doc) {
+    static int markBankIdSignedDataId(Document doc) {
+        // getElementsByTagName returns only Element nodes.
         NodeList bankIdNodes = doc.getElementsByTagName("bankIdSignedData");
         int marked = 0;
         for (int i = 0; i < bankIdNodes.getLength(); i++) {
-            Node node = bankIdNodes.item(i);
-            if (!(node instanceof Element el)) {
-                continue;
-            }
+            Element el = (Element) bankIdNodes.item(i);
             for (String attrName : new String[] { "Id", "ID", "id" }) {
                 if (el.hasAttribute(attrName)) {
                     el.setIdAttribute(attrName, true);
@@ -529,7 +617,7 @@ public class BankIdService {
      * Extract X.509 certificates from {@code <X509Certificate>} elements inside
      * the signed XML. Order is preserved so that index 0 is the user cert.
      */
-    private List<X509Certificate> extractCertificates(Document doc) throws Exception {
+    static List<X509Certificate> extractCertificates(Document doc) throws Exception {
         List<X509Certificate> certs = new ArrayList<>();
         CertificateFactory cf = CertificateFactory.getInstance("X.509");
         NodeList certNodes = doc.getElementsByTagNameNS(XMLSignature.XMLNS, "X509Certificate");
@@ -551,23 +639,18 @@ public class BankIdService {
     /**
      * Validate the BankID certificate chain using the standard PKIX algorithm.
      *
-     * <p>The root certificate in the chain is treated as the trust anchor; this
-     * means the chain is validated for internal consistency (signatures,
-     * validity periods, BasicConstraints, path length, key usage) but the root
-     * itself must be separately trusted by the caller. In practice BankID chains
-     * should terminate in "Finansiell ID-Teknik BID AB" or equivalent — the
-     * caller may want to pin that root explicitly.</p>
+     * <p>The trust anchors are the pinned BankID roots (the test root only with
+     * {@code swish.bankid.allow-test-root}); a root certificate in the
+     * submitted chain is never used as an anchor. PKIX checks signatures,
+     * validity periods, BasicConstraints, path length and key usage.</p>
      *
      * <p>Returns the validated path as well as the verdict: the OCSP step needs
      * the CA certificate that issued the user certificate in order to verify the
      * responder certificate, and that certificate must come from the path PKIX
      * actually validated — not from an unvalidated caller-supplied list.</p>
      */
-    private ChainCheck verifyCertificateChain(List<X509Certificate> certs, List<String> errors) {
-        if (certs.isEmpty()) {
-            errors.add("Empty certificate chain");
-            return ChainCheck.failed();
-        }
+    ChainCheck verifyCertificateChain(List<X509Certificate> certs, List<String> errors) {
+        // The only caller returns "No X509Certificate found" for an empty list.
         try {
             CertificateFactory cf = CertificateFactory.getInstance("X.509");
             // Anchor against the pinned roots, never against a certificate the
@@ -610,7 +693,7 @@ public class BankIdService {
      * not validate, so a caller that needs the issuing CA cannot accidentally
      * obtain it from an unvalidated chain.
      */
-    private record ChainCheck(boolean valid, List<X509Certificate> validatedPath) {
+    record ChainCheck(boolean valid, List<X509Certificate> validatedPath) {
 
         static ChainCheck failed() {
             return new ChainCheck(false, Collections.emptyList());
@@ -732,10 +815,18 @@ public class BankIdService {
             }
 
             // Step 3: the actual revocation status.
+            // The entry must name this certificate: its serial number under
+            // its issuer (the CertID's issuer name and key hashes). A serial
+            // number alone is only unique per CA.
             SingleResp match = null;
+            org.bouncycastle.operator.DigestCalculatorProvider digests =
+                    new org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder().build();
             for (SingleResp single : basic.getResponses()) {
                 if (single.getCertID() != null
-                        && single.getCertID().getSerialNumber().equals(userCert.getSerialNumber())) {
+                        && single.getCertID().getSerialNumber().equals(userCert.getSerialNumber())
+                        && issuingCa != null
+                        && single.getCertID().matchesIssuer(
+                                new org.bouncycastle.cert.jcajce.JcaX509CertificateHolder(issuingCa), digests)) {
                     match = single;
                     break;
                 }
@@ -751,11 +842,28 @@ public class BankIdService {
                 // or unknown.
                 out.errors.add("Certificate status is not good: " + match.getCertStatus());
             }
-            if (match.getNextUpdate() != null && match.getNextUpdate().toInstant().isBefore(Instant.now())) {
+            Instant now = clock.instant();
+            if (match.getNextUpdate() != null && match.getNextUpdate().toInstant().isBefore(now)) {
                 out.errors.add("OCSP response is stale (nextUpdate in the past)");
             }
-            if (basic.getProducedAt() != null) {
+            if (match.getThisUpdate() != null && match.getThisUpdate().toInstant().isAfter(now.plus(CLOCK_SKEW))) {
+                out.errors.add("OCSP thisUpdate is in the future");
+            }
+            // producedAt is the signing time (see verify). The production
+            // BankID response in README.md carries no nextUpdate (thisUpdate
+            // equals producedAt), so without this check a response and its
+            // signature were accepted at any age.
+            if (basic.getProducedAt() == null) {
+                out.errors.add("OCSP response has no producedAt");
+            } else {
                 out.producedAt = basic.getProducedAt().toInstant();
+                if (out.producedAt.isAfter(now.plus(CLOCK_SKEW))) {
+                    out.errors.add("OCSP producedAt is in the future");
+                } else if (out.producedAt.isBefore(now.minus(maxSignatureAge))) {
+                    out.errors.add("BANKID_SIGNATURE_TOO_OLD: the OCSP response was produced at "
+                            + out.producedAt + ", more than " + maxSignatureAge
+                            + " (swish.bankid.max-signature-age) ago");
+                }
             }
 
             // Step 6: nonce binds this response to this signature.
@@ -797,7 +905,7 @@ public class BankIdService {
         return el;
     }
 
-    private String firstElementText(Element scope, String tagName) {
+    static String firstElementText(Element scope, String tagName) {
         NodeList nl = scope.getElementsByTagName(tagName);
         if (nl.getLength() == 0) {
             return null;
@@ -811,22 +919,20 @@ public class BankIdService {
      * by searching for {@code parentTag} first, then within its descendants for
      * {@code childTag}.
      */
-    private String firstElementText(Element scope, String parentTag, String childTag) {
+    static String firstElementText(Element scope, String parentTag, String childTag) {
+        // getElementsByTagName returns only Element nodes.
         NodeList parents = scope.getElementsByTagName(parentTag);
         for (int i = 0; i < parents.getLength(); i++) {
-            Node parent = parents.item(i);
-            if (parent instanceof Element parentElement) {
-                NodeList children = parentElement.getElementsByTagName(childTag);
-                if (children.getLength() > 0) {
-                    String text = children.item(0).getTextContent();
-                    return text == null ? null : text.trim();
-                }
+            NodeList children = ((Element) parents.item(i)).getElementsByTagName(childTag);
+            if (children.getLength() > 0) {
+                String text = children.item(0).getTextContent();
+                return text == null ? null : text.trim();
             }
         }
         return null;
     }
 
-    private String decodeBase64Text(String b64) {
+    static String decodeBase64Text(String b64) {
         if (b64 == null) {
             return null;
         }
@@ -853,7 +959,7 @@ public class BankIdService {
      *         underlying Rdn yielded a {@code byte[]}), or {@code null} if
      *         the attribute is not present.
      */
-    private String extractDnField(String dn, String field) {
+    static String extractDnField(String dn, String field) {
         if (dn == null) {
             return null;
         }
@@ -861,17 +967,10 @@ public class BankIdService {
             LdapName name = new LdapName(dn);
             for (Rdn rdn : name.getRdns()) {
                 if (rdn.getType().equalsIgnoreCase(field)) {
+                    // A parsed Rdn's value is never null: a String, or a byte[]
+                    // for a #-hex (DER) value.
                     Object value = rdn.getValue();
-                    if (value == null) {
-                        return null;
-                    }
-                    if (value instanceof String s) {
-                        return s;
-                    }
-                    if (value instanceof byte[] bytes) {
-                        return decodeAnyStringBytes(bytes);
-                    }
-                    return value.toString();
+                    return value instanceof byte[] bytes ? decodeAnyStringBytes(bytes) : value.toString();
                 }
             }
             return null;
@@ -893,7 +992,7 @@ public class BankIdService {
      * attribute types that Java's LDAP parser doesn't recognise as a native
      * string type, which is rare in BankID DNs.
      */
-    private String decodeAnyStringBytes(byte[] bytes) {
+    static String decodeAnyStringBytes(byte[] bytes) {
         if (bytes.length > 2) {
             return new String(bytes, 2, bytes.length - 2, StandardCharsets.UTF_8);
         }

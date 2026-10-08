@@ -63,7 +63,40 @@ class MockIssuanceClientTest {
 
         MockIssuanceClient client = new MockIssuanceClient(keystore.toString(), PASSWORD, "no-such-alias");
 
-        assertThatThrownBy(client::init).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(client::init).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("holds no private key entry under alias no-such-alias");
+    }
+
+    @Test
+    void aKeystoreWithoutAKeyEntryFailsAtStartUpAndNamesNoAlias() throws Exception {
+        KeyPair caKeyPair = TestPki.newRsaKeyPair(2048);
+        X509Certificate caCertificate = TestPki.selfSignedCa(caKeyPair, "Certificate Only");
+        KeyStore keyStore = KeyStore.getInstance("PKCS12");
+        keyStore.load(null, null);
+        keyStore.setCertificateEntry(ALIAS, caCertificate);
+        Path file = tempDir.resolve("certificate-only.p12");
+        try (OutputStream out = Files.newOutputStream(file)) {
+            keyStore.store(out, PASSWORD.toCharArray());
+        }
+
+        MockIssuanceClient client = new MockIssuanceClient(file.toString(), PASSWORD, "");
+
+        assertThatThrownBy(client::init).isInstanceOf(IllegalStateException.class)
+                .hasMessageEndingWith("holds no private key entry");
+    }
+
+    @Test
+    void theGeneratedCaIsA2048BitRsaCaValidNowAndForAYear() throws Exception {
+        MockIssuanceClient client = new MockIssuanceClient();
+        client.init();
+        X509Certificate ca = client.caCertificate();
+
+        ca.checkValidity();
+        assertThat(ca.getNotAfter().toInstant())
+                .isAfter(java.time.Instant.now().plus(java.time.Duration.ofDays(364)));
+        assertThat(((java.security.interfaces.RSAPublicKey) ca.getPublicKey()).getModulus().bitLength())
+                .isEqualTo(2048);
+        assertThat(ca.getBasicConstraints()).isNotNegative();
     }
 
     @Test
@@ -102,5 +135,24 @@ class MockIssuanceClientTest {
             keyStore.store(out, PASSWORD.toCharArray());
         }
         return file;
+    }
+
+    @Test
+    void aCsrWithTheNewCertificateRequestLabelIsIssued() throws Exception {
+        // It passed verification and failed here until 1.6.0.
+        MockIssuanceClient client = new MockIssuanceClient();
+        client.init();
+        java.security.KeyPair kp = eu.gillstrom.hsm.testsupport.TestPki.newRsaKeyPair(2048);
+        String pem = eu.gillstrom.hsm.testsupport.TestPki.csrPem(kp, "Test", kp.getPrivate())
+                .replace("CERTIFICATE REQUEST", "NEW CERTIFICATE REQUEST");
+        eu.gillstrom.hsm.model.CertificateRequest request = new eu.gillstrom.hsm.model.CertificateRequest();
+        request.setCsr(pem);
+
+        var issued = client.issue(request, "VID");
+
+        var cert = (java.security.cert.X509Certificate) java.security.cert.CertificateFactory.getInstance("X.509")
+                .generateCertificate(new java.io.ByteArrayInputStream(
+                        issued.certificatePem().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        org.assertj.core.api.Assertions.assertThat(cert.getPublicKey().getEncoded()).isEqualTo(kp.getPublic().getEncoded());
     }
 }
