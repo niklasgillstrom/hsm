@@ -35,7 +35,16 @@ Versions before 1.4.0 have no entry here; their history is recorded in
 - **Mutation testing with PIT** (`mvn -Ppit test-compile org.pitest:pitest-maven:mutationCoverage`,
   PIT 1.30.0 with the JUnit 5 plugin 1.2.3, which runs under JUnit 6.0.3).
   First run over all of hsm: 2 094 mutations, 76 % killed, test strength
-  88 %, 298 without coverage. Two survivors of the earlier manual run are
+  88 %, 298 without coverage; now 2 074 of 2 074 detected (2 070 killed,
+  4 timed out), and the profile fails below 100 %. New tests cover the
+  vendor dispatch, early refusals and every issuance stage of
+  `AttestationService` (with mocked collaborators), BankID parsing, OCSP
+  shapes, Id registration, certificate extraction and the PKIX path, the
+  mock gatekeeper and issuance clients, the receipt verifier's refusals, the
+  HTTP client, the policies' start-up warnings and refusal wording, and the
+  size filter's counting stream. Redundant constructs whose mutants no test
+  could kill were removed, not suppressed (see `PEER_REVIEW_GUIDE.md`,
+  Mutation testing); `SwishCaService`, referred to by nothing, is removed. Two survivors of the earlier manual run are
   now killed: ignoring the XML-DSig result
   (`BankIdSignatureVerificationTest.payloadAlteredAfterSigningIsRejected`)
   and bypassing the gatekeeper key registry
