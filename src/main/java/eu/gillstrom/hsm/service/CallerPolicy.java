@@ -70,18 +70,23 @@ public class CallerPolicy {
     public List<String> violations(X509Certificate caller, String organisationNumber, String swishNumber,
             String relyingPartyOrgNumber) {
         List<String> out = new ArrayList<>();
-        if (!required) {
-            return out;
+        if (required) {
+            addViolations(caller, organisationNumber, swishNumber, relyingPartyOrgNumber, out);
         }
+        return out;
+    }
+
+    private static void addViolations(X509Certificate caller, String organisationNumber, String swishNumber,
+            String relyingPartyOrgNumber, List<String> out) {
         if (caller == null) {
             out.add("CALLER_CERTIFICATE_MISSING: the request was not made with a transport certificate (mTLS)");
-            return out;
+            return;
         }
         String number = single(caller, BCStyle.CN);
         String org = digits(single(caller, BCStyle.O));
         if (number == null || org.isEmpty()) {
             out.add("CALLER_NOT_BOUND: the transport certificate's subject has no single CN and O");
-            return out;
+            return;
         }
         if (number.startsWith("123")) {
             if (!number.equals(digits(swishNumber)) || !sameOrganisation(org, digits(organisationNumber))) {
@@ -97,7 +102,6 @@ public class CallerPolicy {
             out.add("CALLER_NOT_BOUND: transport certificate " + number
                     + " is neither a Swish number (123) nor a technical supplier number (987)");
         }
-        return out;
     }
 
     /** A technical supplier as its transport certificate names it. */

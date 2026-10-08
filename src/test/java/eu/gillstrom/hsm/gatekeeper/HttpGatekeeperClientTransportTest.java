@@ -78,4 +78,31 @@ class HttpGatekeeperClientTransportTest {
                 .hasSize(HttpGatekeeperClient.MAX_QUOTED_BODY + 1).endsWith("…");
         assertThat(HttpGatekeeperClient.quoted(null)).isEmpty();
     }
+
+    @Test
+    void aSuccessfulAnswerIsReadIntoTheResponseAndTheCountryIsInThePath() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        java.util.List<String> paths = new java.util.concurrent.CopyOnWriteArrayList<>();
+        server.createContext("/", exchange -> {
+            paths.add(exchange.getRequestURI().getPath());
+            byte[] body = "{\"verificationId\":\"v-1\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
+            // A trailing slash on the configured URL is accepted.
+            HttpGatekeeperClient client = new HttpGatekeeperClient(
+                    "http://127.0.0.1:" + server.getAddress().getPort() + "/", "SE", 5000, true, "",
+                    (SslBundles) null);
+            assertThat(client.verify(VerifyRequest.builder().build()).getVerificationId()).isEqualTo("v-1");
+            assertThat(client.confirm(IssuanceConfirmRequest.builder().build()).getVerificationId())
+                    .isEqualTo("v-1");
+            assertThat(paths).containsExactly("/v1/attestation/SE/verify", "/v1/attestation/SE/confirm");
+        } finally {
+            server.stop(0);
+        }
+    }
 }
