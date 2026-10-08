@@ -62,12 +62,9 @@
 ### Mitigations
 
 - **XXE-protected `DocumentBuilderFactory`** in both `BankIdService` and `SecurosysVerifier`:
-  - `FEATURE_SECURE_PROCESSING` enabled
-  - `disallow-doctype-decl` enabled
-  - External general and parameter entities disabled
-  - `load-external-dtd` disabled
-  - `setXIncludeAware(false)`
-  - `setExpandEntityReferences(false)`
+  - `DocumentBuilderFactory.newDefaultInstance()`, always the JDK parser, with secure processing and the `jdk.xml.*` resource limits on by default (pinned by an attribute-limit test)
+  - `disallow-doctype-decl` enabled: any DOCTYPE is a fatal error, so there is no DTD, no external DTD, no declared entity and no entity reference beyond the five predefined ones; the separate entity and external-DTD switches had nothing left to act on and were removed in 1.6.0
+  - XInclude off (the factory default)
 - **DOM-based field extraction** (`getElementsByTagName` / `getElementsByTagNameNS`) replaces regex throughout.
 - **Stricter ID-attribute scoping in BankID** — `markBankIdSignedDataId(doc)` only marks the one element that BankID's enveloping-signature profile expects as the signed-data root.
 - **Structural OCSP parsing via BouncyCastle** — `BankIdService.checkOcsp()` uses `OCSPResp` / `BasicOCSPResp` / `SingleResp` and matches against the user certificate's `CertID.SerialNumber`, eliminating the byte-scanning collision surface. `BasicOCSPResp.getProducedAt()` is the authoritative source for OCSP time.
