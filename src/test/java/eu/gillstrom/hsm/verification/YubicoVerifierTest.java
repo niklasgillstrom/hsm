@@ -95,7 +95,7 @@ class YubicoVerifierTest {
     @Test
     void capabilitiesOfRealFixtureCarryNoExportFlags() {
         YubicoVerifier.YubicoAttestationResult r = new YubicoVerifier.YubicoAttestationResult();
-        YubicoVerifier.parseCapabilities(bytes(0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x06, 0x60), r);
+        YubicoVerifier.applyCapabilities(bytes(0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x06, 0x60), r);
 
         assertThat(r.isExportableUnderWrap()).isFalse();
         assertThat(r.isCanExportWrapped()).isFalse();
@@ -105,7 +105,7 @@ class YubicoVerifierTest {
     @Test
     void capabilitiesBit16IsExportableUnderWrap() {
         YubicoVerifier.YubicoAttestationResult r = new YubicoVerifier.YubicoAttestationResult();
-        YubicoVerifier.parseCapabilities(bytes(0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00), r);
+        YubicoVerifier.applyCapabilities(bytes(0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00), r);
 
         assertThat(r.isExportableUnderWrap()).isTrue();
         assertThat(r.isCanExportWrapped()).isFalse();
@@ -114,7 +114,7 @@ class YubicoVerifierTest {
     @Test
     void capabilitiesBit12IsExportWrapped() {
         YubicoVerifier.YubicoAttestationResult r = new YubicoVerifier.YubicoAttestationResult();
-        YubicoVerifier.parseCapabilities(bytes(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00), r);
+        YubicoVerifier.applyCapabilities(bytes(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00), r);
 
         assertThat(r.isCanExportWrapped()).isTrue();
         assertThat(r.isExportableUnderWrap()).isFalse();

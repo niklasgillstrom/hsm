@@ -228,16 +228,19 @@ public class SecurosysVerifier implements HsmAttestationVerifier {
 
     /**
      * Parse XML with XXE and external-entity protection.
+     *
+     * <p>Any DOCTYPE is a fatal error ({@code disallow-doctype-decl}; a parser
+     * that does not support the feature makes {@code setFeature} throw, so the
+     * attestation is refused). Without a DOCTYPE there is no DTD, no external
+     * DTD to load, no general or parameter entity to declare or expand, and no
+     * entity reference other than the five predefined ones, so the separate
+     * entity and external-DTD switches have nothing left to act on. XInclude is
+     * off by default ({@link DocumentBuilderFactory#isXIncludeAware()}).</p>
      */
     private Document parseXmlSafely(byte[] xmlBytes) throws Exception {
         DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
         dbf.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
         dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
-        dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
-        dbf.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-        dbf.setXIncludeAware(false);
-        dbf.setExpandEntityReferences(false);
         DocumentBuilder db = dbf.newDocumentBuilder();
         return db.parse(new ByteArrayInputStream(xmlBytes));
     }

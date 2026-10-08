@@ -46,7 +46,6 @@ import java.security.interfaces.RSAPublicKey;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -346,7 +345,7 @@ public final class MarvellAttestation {
             throw new IllegalArgumentException("ulTotalSize " + total + " is not the attestation length " + blob.length);
         }
         long start = total - (buffer + SIGNATURE_SIZE);
-        if (start < 16 || start + 8 > data.length) {
+        if (start < 16) {
             throw new IllegalArgumentException("attribute buffer outside the signed data");
         }
         ByteBuffer d = ByteBuffer.wrap(data);
@@ -387,17 +386,16 @@ public final class MarvellAttestation {
         return Collections.unmodifiableMap(attributes);
     }
 
+    /**
+     * Reads past the end throw {@link IndexOutOfBoundsException} from the
+     * buffer itself; every read runs inside {@link #tryParse}, which takes any
+     * runtime exception as "does not fit this layout".
+     */
     private static long u32(ByteBuffer b, int at) {
-        if (at < 0 || at + 4 > b.limit()) {
-            throw new IllegalArgumentException("read past end");
-        }
         return Integer.toUnsignedLong(b.getInt(at));
     }
 
     private static int u16(ByteBuffer b, int at) {
-        if (at < 0 || at + 2 > b.limit()) {
-            throw new IllegalArgumentException("read past end");
-        }
         return Short.toUnsignedInt(b.getShort(at));
     }
 
@@ -643,10 +641,5 @@ public final class MarvellAttestation {
             out.add((X509Certificate) c);
         }
         return out;
-    }
-
-    /** Hex for diagnostics. */
-    static String hex(byte[] b) {
-        return b == null ? null : HexFormat.of().formatHex(b);
     }
 }

@@ -280,7 +280,9 @@ public class NShieldVerifier implements HsmAttestationVerifier {
             throw new Refusal("not a warrant list rooted at " + KWARN_1);
         }
         PublicKey current = root;
-        for (int i = 1; i < list.size(); i++) {
+        // No loop condition: every certificate before the last continues to the
+        // next one, and the last one returns or throws.
+        for (int i = 1; ; i++) {
             if (!(list.get(i) instanceof Map<?, ?> cert) || cert.size() != 2
                     || !(cert.get(new Ddds.Sym("Signature")) instanceof byte[] sig)
                     || !(cert.get(new Ddds.Sym("Payload")) instanceof byte[] payload)) {
@@ -317,7 +319,6 @@ public class NShieldVerifier implements HsmAttestationVerifier {
                 return new Warrant(warrantKey(body.get(new Ddds.Sym("KLF2pub"))), esn, type.name());
             }
         }
-        throw new IllegalStateException("unreachable");
     }
 
     private static void checkMech(Object mech) throws Refusal {
