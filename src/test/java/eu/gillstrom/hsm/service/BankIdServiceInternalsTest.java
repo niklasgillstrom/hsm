@@ -210,6 +210,14 @@ class BankIdServiceInternalsTest {
         assertThat(errors).containsExactly("Certificate chain contains no certificate below a pinned BankID root");
     }
 
+    @Test
+    void aMandateExposesWhatItCovers() {
+        BankIdService.Mandate m = new BankIdService.Mandate("5569743098", "1231015932", 4);
+        assertThat(m.organisationNumber()).isEqualTo("5569743098");
+        assertThat(m.swishNumber()).isEqualTo("1231015932");
+        assertThat(m.count()).isEqualTo(4);
+    }
+
     // ---- text and DN helpers ---------------------------------------------------------------
 
     @Test

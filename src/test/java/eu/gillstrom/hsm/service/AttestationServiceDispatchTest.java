@@ -668,6 +668,13 @@ class AttestationServiceDispatchTest {
         r.setVerificationTimestamp(now);
         r.setHsmVendor("Yubico");
         assertThat(AttestationService.receiptMismatch(r, sent, now)).isEqualTo("hsmVendor Yubico is not AZURE");
+        // An unknown vendor token has no vendor name; an empty one in the receipt does not stand in for it.
+        r = receipt();
+        r.setVerificationTimestamp(now);
+        r.setHsmVendor("");
+        VerifyRequest unknownVendor = VerifyRequest.builder().hsmVendor("ACME").countryCode("SE")
+                .customerOrganisationNumber(ORG).customerSwishNumber(SWISH).keyPurpose("Swish SIGNING").build();
+        assertThat(AttestationService.receiptMismatch(r, unknownVendor, now)).isEqualTo("hsmVendor  is not ACME");
         r = receipt();
         r.setVerificationTimestamp(now);
         r.setHsmVendor("AZURE");
