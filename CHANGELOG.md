@@ -4,7 +4,7 @@ Versions before 1.4.0 have no entry here; their history is recorded in
 `PEER_REVIEW_GUIDE.md` ("Version 1.3.0 — what changed and what to verify" and
 "Corrections after documentation-versus-code review").
 
-## 1.6.0 (unreleased)
+## 1.6.0 (2026-10-08)
 
 ### Security
 

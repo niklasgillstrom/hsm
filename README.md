@@ -505,7 +505,7 @@ vmware.vscode-boot-dev-pack
 
 ```bash
 mvn clean package
-java -jar target/hsm-1.5.0.jar
+java -jar target/hsm-1.6.0.jar
 ```
 
 **Swagger UI** is off in every profile except `dev` (`application-dev.yaml`); the
@@ -513,7 +513,7 @@ OpenAPI document and the UI have no run-time function and are kept out of the
 deployed surface. Locally:
 
 ```bash
-java -jar target/hsm-1.5.0.jar --spring.profiles.active=dev
+java -jar target/hsm-1.6.0.jar --spring.profiles.active=dev
 # http://localhost:8080/swagger-ui.html   http://localhost:8080/v3/api-docs
 ```
 
