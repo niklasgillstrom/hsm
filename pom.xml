@@ -125,6 +125,9 @@
     <properties>
         <!-- PIT worker threads; override with -Dpit.threads=N on a larger machine. -->
         <pit.threads>4</pit.threads>
+        <!-- Narrow a PIT run, e.g. -Dpit.targetClasses=eu.gillstrom.hsm.util.Fingerprints -->
+        <pit.targetClasses>eu.gillstrom.hsm.*</pit.targetClasses>
+        <pit.targetTests>eu.gillstrom.hsm.*</pit.targetTests>
         <java.version>21</java.version>
         <!-- Spring Boot 4.1.1 manages Tomcat 11.0.24. Tomcat 11.0.25 (2026-08-18) fixes
              CVE-2026-65182/65183/65637/65905/65927/66299/66422/68525/68569/68763/73180.
@@ -332,10 +335,10 @@
                         </dependencies>
                         <configuration>
                             <targetClasses>
-                                <param>eu.gillstrom.hsm.*</param>
+                                <param>${pit.targetClasses}</param>
                             </targetClasses>
                             <targetTests>
-                                <param>eu.gillstrom.hsm.*</param>
+                                <param>${pit.targetTests}</param>
                             </targetTests>
                             <threads>${pit.threads}</threads>
                             <timestampedReports>false</timestampedReports>
