@@ -22,18 +22,28 @@ abstract: >-
   sends the configured country code, for deployment together with
   gatekeeper 1.5.0 and railgate 1.5.0. Version 1.6.0 adds Marvell
   LiquidSecurity, Thales Luna, Crypto4A, Fortanix and Entrust nShield as
-  verified vendors (nine in all), binds the BankID mandate and the caller's
+  vendors (nine in all; Azure, Google Cloud HSM and Marvell attestations
+  are not accepted as compliant until the Marvell format is confirmed
+  against a real attestation), binds the BankID mandate and the caller's
   transport certificate to the request, limits the age and reuse of BankID
   signatures, verifies the gatekeeper's signed confirm response and checks
   each receipt against what was sent, sends the customer and the technical
   supplier to the gatekeeper (receipt form v3, in lockstep with gatekeeper
   1.6.0), adds a key and CSR signature-algorithm policy and a request size
-  limit, and detects every PIT mutant of its production code.
+  limit, and detects every PIT mutant of its production code. Version
+  1.7.0 reports the firmware version and attested FIPS state of a YubiHSM 2
+  attestation, can require attested FIPS-approved mode, locks the
+  fingerprint of every pinned trust anchor with a test, records each
+  anchor's manufacturer source (each confirmed against the manufacturer's
+  material), lets the operator
+  replace a pinned anchor with a root obtained from the manufacturer, and
+  extends the tests on the real Yubico and Securosys fixtures; PIT
+  detects every mutant of the 1.7.0 code as well.
   Companions: gatekeeper (NCA-operated certificate-issuance gate and
   settlement-time signature verification) and railgate (central-bank
   settlement-rail enforcement).
-version: "1.6.0"
-date-released: "2026-10-08"
+version: "1.7.0"
+date-released: "2026-10-31"
 license: MIT
 repository-code: "https://github.com/niklasgillstrom/hsm"
 authors:

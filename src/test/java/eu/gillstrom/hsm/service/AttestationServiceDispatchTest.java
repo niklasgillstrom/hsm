@@ -365,6 +365,96 @@ class AttestationServiceDispatchTest {
         assertThat(service.verify(request("yubico")).isValid()).isTrue();
     }
 
+    // ---- firmware, FIPS indicator, FIPS-approved mode ------------------------------------
+
+    private void stubYubicoCertifiedState(boolean chainValid, Boolean fipsApprovedMode) {
+        var r = mock(YubicoVerifier.YubicoAttestationResult.class);
+        when(r.isValid()).thenReturn(chainValid);
+        when(r.getErrors()).thenReturn(List.of());
+        when(r.isPublicKeyMatch()).thenReturn(true);
+        when(r.isChainValid()).thenReturn(chainValid);
+        when(r.getKeyOrigin()).thenReturn("generated");
+        when(r.getDeviceSerial()).thenReturn("SER");
+        when(r.getFirmware()).thenReturn("2.4.0");
+        when(r.getFipsIndicator()).thenReturn(6);
+        when(r.getFipsApprovedMode()).thenReturn(fipsApprovedMode);
+        when(yubico.verifyYubicoAttestation(any(), any())).thenReturn(r);
+    }
+
+    @Test
+    void firmwareAndFipsFieldsAreReportedForAYubicoChainThatValidatedAndForNoOtherVendor() {
+        stubYubicoCertifiedState(true, Boolean.TRUE);
+        VerificationResponse y = service.verify(request("YUBICO"));
+        assertThat(y.isValid()).isTrue();
+        assertThat(y.getHsmFirmwareVersion()).isEqualTo("2.4.0");
+        assertThat(y.getHsmFipsIndicator()).isEqualTo(6);
+        assertThat(y.getHsmFipsApprovedMode()).isTrue();
+
+        // Values read from a chain that did not validate to the pinned root are not attested.
+        stubYubicoCertifiedState(false, Boolean.TRUE);
+        VerificationResponse unanchored = service.verify(request("YUBICO"));
+        assertThat(unanchored.getHsmFirmwareVersion()).isNull();
+        assertThat(unanchored.getHsmFipsIndicator()).isNull();
+        assertThat(unanchored.getHsmFipsApprovedMode()).isNull();
+
+        for (String[] v : VENDORS) {
+            if (v[0].equals("YUBICO")) {
+                continue;
+            }
+            stub(v[0], Outcome.good());
+            VerificationResponse r = service.verify(request(v[0]));
+            assertThat(r.isValid()).as(v[0]).isTrue();
+            assertThat(r.getHsmFirmwareVersion()).as(v[0]).isNull();
+            assertThat(r.getHsmFipsIndicator()).as(v[0]).isNull();
+            assertThat(r.getHsmFipsApprovedMode()).as(v[0]).isNull();
+        }
+    }
+
+    @Test
+    void aRequiredFipsApprovedModeIsMetOnlyByAYubicoAttestationThatStatesIt() {
+        service = new AttestationService(bankId, securosys, yubico, azure, google, marvell, thales, crypto4a,
+                fortanix, nshield, (p, o, s) -> signatory, gatekeeper, receiptVerifier, issuance,
+                new KeyPolicy("RSA-2048", KeyPolicy.DEFAULT_ALLOWED_CSR_SIGNATURE_ALGORITHMS, true),
+                mock(BankIdConsentPolicy.class), CallerPolicy.off(), "SE");
+
+        stubYubicoCertifiedState(true, Boolean.TRUE);
+        VerificationResponse stated = service.verify(request("YUBICO"));
+        assertThat(stated.getErrors()).isEmpty();
+        assertThat(stated.isValid()).isTrue();
+
+        stubYubicoCertifiedState(true, Boolean.FALSE);
+        assertThat(service.verify(request("YUBICO")).getErrors()).containsExactly(
+                "FIPS_APPROVED_MODE_NOT_ATTESTED: the Yubico attestation states FIPS-approved mode false "
+                        + "(1.3.6.1.4.1.41482.4.12), and swish.key-policy.require-fips-approved-mode=true "
+                        + "requires it to be true");
+
+        stubYubicoCertifiedState(true, null);
+        VerificationResponse absent = service.verify(request("YUBICO"));
+        assertThat(absent.isValid()).isFalse();
+        assertThat(absent.getErrors()).containsExactly(
+                "FIPS_APPROVED_MODE_NOT_ATTESTED: the Yubico attestation carries no attested FIPS-approved flag "
+                        + "(1.3.6.1.4.1.41482.4.12), and swish.key-policy.require-fips-approved-mode=true "
+                        + "requires it to be true");
+
+        // A TRUE flag in a chain that did not validate is not attested.
+        stubYubicoCertifiedState(false, Boolean.TRUE);
+        assertThat(service.verify(request("YUBICO")).getErrors()).singleElement().asString()
+                .startsWith("FIPS_APPROVED_MODE_NOT_ATTESTED: the Yubico attestation carries no attested");
+
+        for (String[] v : VENDORS) {
+            if (v[0].equals("YUBICO")) {
+                continue;
+            }
+            stub(v[0], Outcome.good());
+            VerificationResponse r = service.verify(request(v[0]));
+            assertThat(r.isValid()).as(v[0]).isFalse();
+            assertThat(r.getErrors()).as(v[0]).containsExactly("FIPS_MODE_NOT_IN_ATTESTATION_FORMAT: the "
+                    + HsmVendor.valueOf(v[0]).getVendorName() + " attestation, as this verifier reads it, carries "
+                    + "no statement that the HSM operates in FIPS-approved mode, which "
+                    + "swish.key-policy.require-fips-approved-mode=true requires");
+        }
+    }
+
     // ---- refusals before any vendor is asked -----------------------------------------------
 
     @Test

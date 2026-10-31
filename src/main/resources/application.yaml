@@ -59,6 +59,35 @@ swish:
   key-policy:
     allowed-keys: ${SWISH_KEY_POLICY_ALLOWED_KEYS:RSA-4096}
     allowed-csr-signature-algorithms: ${SWISH_KEY_POLICY_ALLOWED_CSR_SIGNATURE_ALGORITHMS:SHA256withRSA,SHA384withRSA,SHA512withRSA}
+    # When true, a SIGNING request's HSM attestation must itself state that the
+    # HSM operates in FIPS-approved mode. The only such statement the verifiers
+    # read is Yubico's (extension 1.3.6.1.4.1.41482.4.12); without it, or with
+    # it false, the request is refused with FIPS_APPROVED_MODE_NOT_ATTESTED.
+    # Every other vendor is refused with FIPS_MODE_NOT_IN_ATTESTATION_FORMAT.
+    require-fips-approved-mode: ${SWISH_KEY_POLICY_REQUIRE_FIPS_APPROVED_MODE:false}
+
+  # Trust anchors the attestation verifiers start from. Each is pinned in the
+  # verifier source, where its comment block names the manufacturer's source.
+  # Naming a PEM file here replaces the pinned anchor with the operator's own
+  # copy, downloaded from the manufacturer; empty keeps the pinned anchor.
+  # A named file that is missing, does not parse, holds a key of another type
+  # or curve than the pinned anchor, or (for certificates) is not self-signed
+  # stops start-up; so does an unknown key. Start-up logs each file's SHA-256
+  # (of the DER certificate; for entrust, of the DER SubjectPublicKeyInfo) and
+  # a WARN naming both values when it is not the pinned anchor.
+  trust-anchors:
+    yubico: ${SWISH_TRUST_ANCHOR_YUBICO:}
+    securosys: ${SWISH_TRUST_ANCHOR_SECUROSYS:}
+    # One or more certificates; they replace both pinned Marvell roots, for
+    # the AZURE, GOOGLE and MARVELL verifiers.
+    marvell: ${SWISH_TRUST_ANCHOR_MARVELL:}
+    # Google's owner root (pinned: Hawksbill Root v1 prod), GOOGLE only.
+    google-owner: ${SWISH_TRUST_ANCHOR_GOOGLE_OWNER:}
+    thales: ${SWISH_TRUST_ANCHOR_THALES:}
+    crypto4a: ${SWISH_TRUST_ANCHOR_CRYPTO4A:}
+    fortanix: ${SWISH_TRUST_ANCHOR_FORTANIX:}
+    # A PEM PUBLIC KEY (SubjectPublicKeyInfo) on NIST P-521, not a certificate.
+    entrust: ${SWISH_TRUST_ANCHOR_ENTRUST:}
 
   issuance:
     # mock — issues a leaf certificate signed by an ephemeral in-process test

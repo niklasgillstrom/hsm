@@ -122,6 +122,34 @@ class KeyPolicyTest {
     }
 
     @Test
+    @DisplayName("FIPS-approved mode is not required unless configured, and then only Yubico can meet it")
+    void fipsApprovedModeIsNotRequiredByDefault() {
+        for (KeyPolicy off : new KeyPolicy[] {KeyPolicy.defaults(), new KeyPolicy("RSA-4096", "SHA256withRSA"),
+                new KeyPolicy("RSA-4096", "SHA256withRSA", false)}) {
+            assertThat(off.requiresFipsApprovedMode()).isFalse();
+            for (eu.gillstrom.hsm.model.HsmVendor v : eu.gillstrom.hsm.model.HsmVendor.values()) {
+                assertThat(off.fipsModeViolation(v, null)).as(v.name()).isEmpty();
+                assertThat(off.fipsModeViolation(v, Boolean.FALSE)).as(v.name()).isEmpty();
+            }
+        }
+        KeyPolicy on = new KeyPolicy("RSA-4096", "SHA256withRSA", true);
+        assertThat(on.requiresFipsApprovedMode()).isTrue();
+        for (eu.gillstrom.hsm.model.HsmVendor v : eu.gillstrom.hsm.model.HsmVendor.values()) {
+            if (v == eu.gillstrom.hsm.model.HsmVendor.YUBICO) {
+                assertThat(on.fipsModeViolation(v, Boolean.TRUE)).isEmpty();
+                assertThat(on.fipsModeViolation(v, Boolean.FALSE)).get().asString()
+                        .startsWith(KeyPolicy.FIPS_APPROVED_MODE_NOT_ATTESTED + ": ");
+                assertThat(on.fipsModeViolation(v, null)).get().asString()
+                        .startsWith(KeyPolicy.FIPS_APPROVED_MODE_NOT_ATTESTED + ": ");
+            } else {
+                // A statement passed for another vendor does not count: its format has none this verifier reads.
+                assertThat(on.fipsModeViolation(v, Boolean.TRUE)).as(v.name()).get().asString()
+                        .startsWith(KeyPolicy.FIPS_MODE_NOT_IN_ATTESTATION_FORMAT + ": ");
+            }
+        }
+    }
+
+    @Test
     @DisplayName("A key that is neither RSA nor a named EC curve is described by its algorithm OID")
     void otherKeysAreDescribedByTheirAlgorithmOid() throws Exception {
         java.security.PublicKey ed = KeyPairGenerator.getInstance("Ed25519").generateKeyPair().getPublic();

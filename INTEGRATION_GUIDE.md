@@ -14,7 +14,9 @@ The audience is a **systems / integration engineer** at the FE who has been aske
 
 | Component | Role | Production-trustable as-is? |
 | --- | --- | --- |
-| `verification/SecurosysVerifier`, `verification/YubicoVerifier` | Vendor-specific HSM attestation verifiers; pin real vendor roots; PKIX-validated chain + signature + non-extractability check | Yes |
+| `verification/SecurosysVerifier`, `verification/YubicoVerifier` | Vendor-specific HSM attestation verifiers; pin real vendor roots; PKIX-validated chain + signature + non-extractability check. Since 1.7.0 the Yubico verifier also reports firmware, FIPS indicator and FIPS-approved flag | Yes; verified against the real YubiHSM 2 and Securosys Primus fixtures (`RealAttestationFixtureTest`) |
+| `verification/ThalesLunaVerifier`, `verification/Crypto4AVerifier`, `verification/FortanixVerifier`, `verification/NShieldVerifier` | Thales Luna, Crypto4A QASM, Fortanix DSM and Entrust nShield verifiers; pin their vendors' anchors (Thales and Crypto4A by key, Entrust the bare KWARN-1 key) | Yes, with a caveat: verified only against the vendors' published samples (Thales's test vector, the PKI Consortium's Crypto4A message, Fortanix's documented sample; Entrust's two example bundles carry a warrant type the verifier refuses), not against an attestation of an RSA-4096 key, which the default key policy requires |
+| `verification/TrustAnchors` + `service/TrustAnchorConfiguration` *(1.7.0)* | The trust anchors the nine verifiers start from: the pinned constants, or the FE's own copies of the manufacturers' roots under `swish.trust-anchors.<key>` | Yes; without configuration every verifier holds its pinned anchor |
 | `verification/AzureHsmVerifier`, `verification/GoogleCloudHsmVerifier`, `verification/MarvellAttestation`, `verification/MarvellHsmVerifier` | Marvell-based verifiers (Azure, Google, physical Marvell); Marvell roots from Microsoft's validator, Google owner root | **No**: never valid until a real Azure / Google / Marvell attestation confirms the Marvell format (`MARVELL_FORMAT_UNCONFIRMED`) |
 | `gatekeeper/GatekeeperClient` (interface) + `HttpGatekeeperClient` | The FE → NCA verify/confirm RPC, two-step protocol | Yes — `mode=http` against the NCA's published gatekeeper URL |
 | `gatekeeper/ReceiptVerifier`, `gatekeeper/ReceiptCanonicalizer` | Validates the gatekeeper's signature over the canonical form of the receipt, under a trusted gatekeeper key | Yes |
@@ -35,7 +37,8 @@ The four-phase supervisory issuance flow described in Gillström (in preparation
 ```
 Phase 1 — Local verification (FE side)
   · Parse CSR + attestation submitted by TL
-  · Run the vendor verifier (Securosys / Yubico / Azure / Google) → must pass
+  · Run the vendor verifier (one of the nine; see README "Supported HSM Vendors")
+    → must pass
   · Verify BankID-signed mandate → must authorise this TL
   · Verify signatory rights against FE's own registry → must permit issuance
 
@@ -114,6 +117,8 @@ Replace `MockIssuanceClient` with an `IssuanceClient` implementation that takes 
 | `SWISH_SIGNATORY_RIGHTS_MODE` | Signatory-rights adapter | The FE's custom adapter name; **must not stay at `fail-closed`** in production |
 | `SWISH_CALLER_BINDING` | Bind the caller's transport certificate to the request (`CallerPolicy`) | `required` (the default), with `SERVER_SSL_CLIENT_AUTH=need` and the Swish CA in `server.ssl.trust-store` |
 | `SWISH_ISSUANCE_MODE` | CA backend | The FE's custom integration; **must not stay at `mock`** in production |
+| `SWISH_KEY_POLICY_REQUIRE_FIPS_APPROVED_MODE` | Require an attested FIPS-approved flag (since 1.7.0) | `false` (default) unless every signing key must come from an attestation stating FIPS-approved mode: only a YubiHSM 2 attestation with the flag can meet it, the reference YubiHSM 2 carries none, and every other vendor is refused (`FIPS_MODE_NOT_IN_ATTESTATION_FORMAT`) |
+| `SWISH_TRUST_ANCHOR_<KEY>` | PEM file replacing a pinned trust anchor (`swish.trust-anchors.<key>`, since 1.7.0); `<KEY>` is `YUBICO`, `SECUROSYS`, `MARVELL`, `GOOGLE_OWNER`, `THALES`, `CRYPTO4A`, `FORTANIX` or `ENTRUST` | Empty (pinned anchor), or the root the FE obtained from the manufacturer; a file that is not of the pinned anchor's form stops start-up. Not tested as environment variables (README, "Replacing a trust anchor") |
 
 The mTLS client certificate the FE presents to the gatekeeper, and the trust store for the gatekeeper's certificate, come from a Spring Boot SSL bundle named by `swish.gatekeeper.ssl-bundle` (`spring.ssl.bundle.jks.<name>.keystore.*` / `.truststore.*`, or the `pem` equivalents). When the property is empty the JVM defaults apply (`-Djavax.net.ssl.keyStore=...`). `swish.gatekeeper.url` must be `https://`. If the gatekeeper signs receipts with anything other than SHA256withRSA, set `swish.gatekeeper.signature-algorithm` to the same algorithm.
 
@@ -127,7 +132,7 @@ The FE's own audit record must cover what the gatekeeper's audit log does **not*
 | --- | --- | --- |
 | CSR submitted by TL (DER bytes) | FE's issuance record | DORA Article 28(6) — minimum 5 years |
 | Attestation blob submitted by TL | FE's issuance record | Same |
-| Local-verification result (per-vendor verifier) | FE's issuance record | Same |
+| Local-verification result (per-vendor verifier; since 1.7.0 with `hsmFirmwareVersion`, `hsmFipsIndicator`, `hsmFipsApprovedMode` for Yubico) | FE's issuance record | Same |
 | `verificationId` returned by gatekeeper | FE's issuance record | Same |
 | Gatekeeper receipt PEM (signed) | FE's issuance record | Same |
 | BankID-signed mandate | FE's issuance record | Same |
@@ -137,7 +142,7 @@ The FE's own audit record must cover what the gatekeeper's audit log does **not*
 
 Periodic data triangulation by the supervisor (described in the gatekeeper repo's `SUPERVISORY_OPERATIONS.md` §3.5) cross-references the FE's issuance record (this repository's audit data, not the gatekeeper's) with the gatekeeper's audit log and the issuing CA's CRL/OCSP. An issued cert without a matching `verificationId`+receipt in the FE's own record is a self-flagged Article 6(10) breach.
 
-The FE retains these records under the FE's own retention infrastructure — separate from the gatekeeper's. There is no shared-storage assumption. From gatekeeper 1.6.0 the gatekeeper also keeps the submitted verification request, attestation evidence included, so the supervisor no longer depends on the FE's copy; the FE's own obligation is unchanged.
+The FE retains these records under the FE's own retention infrastructure — separate from the gatekeeper's. There is no shared-storage assumption. From gatekeeper 1.6.0 the gatekeeper also keeps the submitted verification request, attestation evidence included, so the supervisor no longer depends on the FE's copy; the FE's own obligation is unchanged. From gatekeeper 1.7.0 each gatekeeper audit entry also carries the key's inventory fields (key fingerprint, certificate serial and issuer, HSM vendor and serial, registry status, firmware, FIPS-approved flag), and the gatekeeper can run a triangulation inquiry over bank and operator reports and its registry; in the Swish case the operator report would come from the FE. No FE-side code submits such a report.
 
 ---
 
@@ -160,7 +165,7 @@ If the FE's CA signs the CSR but then `gatekeeper.confirm` fails (e.g., public-k
 
 ### 6.3 Receipt validation
 
-Every receipt the FE receives from the gatekeeper must be validated against the trusted gatekeeper certificates in `swish.gatekeeper.trusted-keys` before being relied on. `ReceiptVerifier.verify(receipt)` does this and returns true or false: it (i) parses the signing certificate the receipt carries, (ii) requires that certificate's public key to be one of the trusted keys, and (iii) verifies the signature over the receipt's canonical bytes under that trusted key with `swish.gatekeeper.signature-algorithm`. `AttestationService` then requires the receipt to approve the CSR's key and to belong to this request: issued within 5 minutes, with the country, supplier, key purpose and HSM vendor the request sent and the key properties of a compliant key. If any of this fails, treat it as if the gatekeeper had returned an error — do NOT proceed with issuance.
+Every receipt the FE receives from the gatekeeper must be validated against the trusted gatekeeper certificates in `swish.gatekeeper.trusted-keys` before being relied on. `ReceiptVerifier.verify(receipt)` does this and returns true or false: it (i) parses the signing certificate the receipt carries, (ii) requires that certificate's public key to be one of the trusted keys, and (iii) verifies the signature over the receipt's canonical bytes under that trusted key with `swish.gatekeeper.signature-algorithm`. `AttestationService` then requires the receipt to approve the CSR's key and to belong to this request: issued within 5 minutes, with the country, supplier, key purpose and HSM vendor the request sent and the key properties of a compliant key. If any of this fails, treat it as if the gatekeeper had returned an error — do NOT proceed with issuance. A gatekeeper 1.7.0 receipt also carries `hsmFirmwareVersion`, `hsmFipsIndicator` and `hsmFipsApprovedMode`, outside its signed form; `HttpGatekeeperClient` ignores them, and the FE reports its own locally computed values.
 
 The FE's trusted-keys list is updated whenever the NCA rotates its receipt-signing key. The NCA publishes both active and retired keys via `GET /v1/gatekeeper/keys`; the FE polls or watches this endpoint and refreshes `swish.gatekeeper.trusted-keys`. Receipts signed under retired keys remain verifiable for the 5-year retention horizon — the registry includes retired keys for that reason.
 
@@ -195,5 +200,7 @@ Before the FE's first production traffic:
 - [ ] `confirm` failure recovery procedure is documented and exercised
 - [ ] `ReceiptVerifier.verify(...)` is called on every received receipt and a failed verification is fatal
 - [ ] Negative test: deliberate verification failure (corrupt attestation) results in a 4xx to the TL with no cert issuance
+- [ ] The pinned trust anchors have been compared with the roots obtained from the manufacturers (README, "Production"), and any `swish.trust-anchors.<key>` override shows the expected SHA-256 in the start-up log (logged at INFO)
+- [ ] `swish.key-policy.require-fips-approved-mode` is set deliberately: `true` refuses every vendor except a YubiHSM 2 whose attestation states FIPS-approved mode
 
 When every box is ticked, the FE-side integration is ready to accept TL traffic.

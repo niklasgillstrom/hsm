@@ -22,6 +22,13 @@ public class VerificationResponse {
     private String hsmVendor;
     private String hsmModel;
     private String hsmSerialNumber;
+    // What the attestation states about the HSM's firmware and FIPS mode. Yubico only
+    // (firmware 1.3.6.1.4.1.41482.4.1, FIPS indicator .4.10, FIPS-approved
+    // .4.12), and only from a chain that validated to the pinned root; null
+    // otherwise and for every other vendor.
+    private String hsmFirmwareVersion;
+    private Integer hsmFipsIndicator;
+    private Boolean hsmFipsApprovedMode;
     private boolean publicKeyMatch;
     private boolean attestationChainValid;
 

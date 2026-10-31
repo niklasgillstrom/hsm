@@ -10,7 +10,7 @@ Reference implementation for verification of HSM attestation in Swish certificat
 | `INTEGRATION_GUIDE.md` | FE systems / integration engineer | How to wire this pattern into the FE's existing certificate-issuance pipeline: what's reusable, what adapters the FE must implement, configuration, audit/retention obligations, pre-production checklist |
 | `PEER_REVIEW_GUIDE.md` | Academic peer reviewer | What the repo is and isn't, build-and-test, reproducible assertions, known limitations |
 | `THREAT_MODEL.md` | Security reviewer, peer reviewer | Adversary model, mitigations, residual risks |
-| `CROSS_REFERENCE.md` | Peer reviewer, deployer | Article-claim ↔ code-path mapping; honest GAP flags for what is and is not yet executable. Identical in both repositories. |
+| `CROSS_REFERENCE.md` | Peer reviewer, deployer | Article-claim ↔ code-path mapping; honest GAP flags for what is and is not yet executable. Identical in all three repositories. |
 
 The companion repository `gatekeeper` carries the supervisory side and includes its own `DEPLOYMENT.md`, `SUPERVISORY_OPERATIONS.md` and `FORENSIC_INSPECTION.md` for the NCA-side runbook.
 
@@ -70,6 +70,9 @@ The companion repository `gatekeeper` carries the supervisory side and includes 
   "hsmVendor": "Securosys",
   "hsmModel": "Primus HSM (RSA 4096)",
   "hsmSerialNumber": "18000000",
+  "hsmFirmwareVersion": null,
+  "hsmFipsIndicator": null,
+  "hsmFipsApprovedMode": null,
   "publicKeyMatch": true,
   "attestationChainValid": true,
   "keyOrigin": "generated",
@@ -103,6 +106,9 @@ The companion repository `gatekeeper` carries the supervisory side and includes 
   "hsmVendor": null,
   "hsmModel": null,
   "hsmSerialNumber": null,
+  "hsmFirmwareVersion": null,
+  "hsmFipsIndicator": null,
+  "hsmFipsApprovedMode": null,
   "publicKeyMatch": false,
   "attestationChainValid": false,
   "keyOrigin": null,
@@ -124,6 +130,8 @@ The companion repository `gatekeeper` carries the supervisory side and includes 
   "warnings": []
 }
 ```
+
+**Firmware and FIPS state** *(since 1.7.0)*. `hsmFirmwareVersion`, `hsmFipsIndicator` and `hsmFipsApprovedMode` report what a YubiHSM 2 attestation states: the firmware (`1.3.6.1.4.1.41482.4.1`), the FIPS indicator (`.4.10`, an integer) and the FIPS-approved flag (`.4.12`, a boolean), each read from the key attestation certificate or, when it has none, from the next certificate in the chain, the device attestation certificate. They are set only when the chain validated to the pinned Yubico root, whatever `valid` is, and are `null` for every other vendor — hence `null` in the Securosys example above. For the reference YubiHSM 2 (`examples/yubico`) they are `"2.2.0"`, `5` and `null`: its attestation carries no FIPS-approved flag. The indicator is reported, not interpreted, and nothing here maps firmware to a FIPS 140 or Common Criteria certificate. The gatekeeper 1.7.0 receipt carries fields of the same names; hsm does not read them (`HttpGatekeeperClient` ignores unknown properties) and reports its own.
 
 ## Four-phase supervisory issuance flow
 
@@ -212,6 +220,8 @@ The gatekeeper and issuance components are pluggable via `application.yaml` / en
 | `swish.caller-binding` | `required` (`off` in `application-dev.yaml`) | `required` — the caller's mTLS transport certificate must match the request (`CallerPolicy`): a 123 certificate its Swish and organisation numbers, a 987 certificate the BankID relying party; otherwise `CALLER_NOT_BOUND`, or `CALLER_CERTIFICATE_MISSING` without one. Needs `server.ssl.client-auth=need` with the Swish CA in `server.ssl.trust-store` |
 | `swish.bankid.allowed-relying-parties` | empty (every request refused, logged at `WARN`) | comma-separated organisation numbers of the BankID relying parties (the technical suppliers) whose BankID orders may authorise a request; any other is refused with `BANKID_RELYING_PARTY_NOT_ALLOWED` |
 | `swish.key-policy.allowed-keys` | `RSA-4096` | comma-separated allow-list of `RSA-<bits>` / `EC-<curve>` (SEC names, e.g. `EC-secp384r1`); any other key is refused with `KEY_POLICY_VIOLATION` |
+| `swish.key-policy.require-fips-approved-mode` | `false` | `true` only if every signing key must come from an HSM whose attestation states FIPS-approved mode. Since 1.7.0; `SWISH_KEY_POLICY_REQUIRE_FIPS_APPROVED_MODE`. Only a Yubico attestation can meet it (`FIPS_APPROVED_MODE_NOT_ATTESTED` otherwise); every other vendor is refused with `FIPS_MODE_NOT_IN_ATTESTATION_FORMAT`, and so is the reference YubiHSM 2, which carries no FIPS-approved flag |
+| `swish.trust-anchors.<key>` | empty (pinned anchor) | path of a PEM file replacing a pinned trust anchor, obtained from the manufacturer; keys `yubico`, `securosys`, `marvell`, `google-owner`, `thales`, `crypto4a`, `fortanix`, `entrust`. Since 1.7.0; `SWISH_TRUST_ANCHOR_<KEY>` (e.g. `SWISH_TRUST_ANCHOR_GOOGLE_OWNER`). See "Replacing a trust anchor" under Production |
 | `swish.key-policy.allowed-csr-signature-algorithms` | `SHA256withRSA,SHA384withRSA,SHA512withRSA` | comma-separated allow-list of JCA names for the CSR's own signature; SHA-1 and MD5 are refused |
 | `swish.issuance.mode` | `mock` | replace with custom `IssuanceClient` against the Getswish CA |
 | `swish.bankid.allow-test-root` | `false` (`true` in `application-dev.yaml`) | `false` — the `Test BankID Root CA v1 Test` anchor is trusted only when this is `true` |
@@ -247,6 +257,7 @@ Numbered pipeline:
    - Verify the attestation certificate chain with PKIX `CertPathValidator` anchored at the pinned vendor root CA.
    - Verify the attestation signature. Securosys: a detached `SHA256withRSA` (PKCS#1 v1.5) signature over the raw XML bytes, which is what the real fixture carries. PSS-signed attestations (`CKM_SHA256_RSA_PKCS_PSS`, the mechanism in Securosys' own PKCS#11 example `hsm-api-examples/pkcs/c/src/attestation.cpp`) are not supported and are rejected. Cloud HSMs: see the vendor table below.
    - Verify key attributes: generated on the device and not exportable. Securosys: the root element must be `<private_key creation="generated">` (`SECUROSYS_KEY_NOT_GENERATED` otherwise) and `extractable=false`, `never_extractable=true`, `sensitive=true`, `always_sensitive=true`. Yubico: the origin and capabilities extensions.
+   - With `swish.key-policy.require-fips-approved-mode=true` *(since 1.7.0)*: require an attested FIPS-approved flag of `true` (Yubico only, from a validated chain). The refusal is local, so the request never reaches the gatekeeper; TRANSPORT requests are not affected.
 6. **Server-enforced certificate type** *(DORA-mandated)*: SIGNING requests that do not carry attestation evidence are rejected. TRANSPORT requests that do carry attestation data are rejected as ambiguous.
 7. **Issue certificate**: The Swish CA issues a transport or signing certificate matching the validated request type.
 
@@ -333,6 +344,8 @@ Request:
   ...
 }
 ```
+
+Since 1.7.0 the verifier also reports the firmware, FIPS indicator and FIPS-approved flag of the attestation (see "Firmware and FIPS state" above); they never change `valid`, except through the optional `swish.key-policy.require-fips-approved-mode`.
 
 The Yubico root CA is *not* sent in the request — it is pinned in `YubicoVerifier` (SHA-256 `09:4A:3A:C4:93:C2:BD:CD:65:A5:4B:DF:40:19:0F:52:BB:03:F7:15:63:97:A3:FC:69:D8:AA:9A:39:2F:B7:24`). A complete real-world example payload is bundled at `examples/yubico/request.json`; the integration test in `RealAttestationFixtureTest` exercises that fixture.
 
@@ -505,7 +518,7 @@ vmware.vscode-boot-dev-pack
 
 ```bash
 mvn clean package
-java -jar target/hsm-1.6.0.jar
+java -jar target/hsm-1.7.0.jar
 ```
 
 **Swagger UI** is off in every profile except `dev` (`application-dev.yaml`); the
@@ -513,7 +526,7 @@ OpenAPI document and the UI have no run-time function and are kept out of the
 deployed surface. Locally:
 
 ```bash
-java -jar target/hsm-1.6.0.jar --spring.profiles.active=dev
+java -jar target/hsm-1.7.0.jar --spring.profiles.active=dev
 # http://localhost:8080/swagger-ui.html   http://localhost:8080/v3/api-docs
 ```
 
@@ -522,20 +535,37 @@ java -jar target/hsm-1.6.0.jar --spring.profiles.active=dev
 Production deployment requires, beyond the reference configuration shipped here:
 
 - **HSM manufacturer root CAs**:
-  - **Securosys Primus** (`SecurosysVerifier`) — real vendor-issued root.
+  - **Securosys Primus** (`SecurosysVerifier`) — real vendor-issued root. *(Since 1.7.0)* its comment block names Securosys's source, `https://support.securosys.com/external/knowledge-base/article/147` (file `hsm_rsa_root.crt`), linked from `https://docs.securosys.com/primus-hsm/tutorials/key_attestation_verify`, which warns: "Always download the root certificate directly from Securosys. Do not accept it from an auditee."
   - **Yubico YubiHSM** (`YubicoVerifier`) — real vendor-issued root, sourced from `https://developers.yubico.com/YubiHSM2/Concepts/yubihsm2-attest-ca-crt.pem`. SHA-256 fingerprint `09:4A:3A:C4:93:C2:BD:CD:65:A5:4B:DF:40:19:0F:52:BB:03:F7:15:63:97:A3:FC:69:D8:AA:9A:39:2F:B7:24`. Operators should re-verify the fingerprint against an authoritative Yubico source.
-  - **Azure Managed HSM** (`AzureHsmVerifier`) and **Google Cloud HSM** (`GoogleCloudHsmVerifier`) share `MarvellAttestation`, which pins the two Marvell roots in Microsoft's validator (MIT, `Azure/azure-managed-hsm-key-attestation`): the LiquidSecurity root reissued 2024-07-25 to 2034-07-23 with the same key as the 2015 root pinned before (SHA-256 `23:01:43:DF:00:E0:B4:52:74:3E:06:8A:5B:3F:C0:8D:F8:F0:6C:EF:C4:85:4E:A6:27:AE:B7:EB:D7:0E:E2:F4`) and the LiquidSecurity 2 root (SHA-256 `17:64:4D:E0:D3:3B:C7:3B:2F:4E:F4:C2:0A:11:F6:C8:CC:1F:72:3A:4C:D8:3E:E6:00:36:1C:BB:24:D8:D2:E5`). Google's owner root "Hawksbill Root v1 prod" (SHA-256 `46:B5:FD:35:1D:56:A0:72:1C:A0:AF:CD:17:31:C0:F7:B7:4E:39:41:EB:81:8B:FD:0E:C3:6E:29:DF:0D:E0:95`, valid to 2030-01-01) is copied from Google's `verify_attestation_chains.py`. Microsoft's validator also checks a partition chain, but it starts from a self-signed certificate taken from the submitted bundle, so it is not used. Operators should re-verify the Marvell roots against `marvell.com/.../liquid_security_certificate.zip`.
+  - **Azure Managed HSM** (`AzureHsmVerifier`) and **Google Cloud HSM** (`GoogleCloudHsmVerifier`) share `MarvellAttestation`, which pins the two Marvell roots in Microsoft's validator (MIT, `Azure/azure-managed-hsm-key-attestation`): the LiquidSecurity root reissued 2024-07-25 to 2034-07-23 with the same key as the 2015 root pinned before (SHA-256 `23:01:43:DF:00:E0:B4:52:74:3E:06:8A:5B:3F:C0:8D:F8:F0:6C:EF:C4:85:4E:A6:27:AE:B7:EB:D7:0E:E2:F4`) and the LiquidSecurity 2 root (SHA-256 `17:64:4D:E0:D3:3B:C7:3B:2F:4E:F4:C2:0A:11:F6:C8:CC:1F:72:3A:4C:D8:3E:E6:00:36:1C:BB:24:D8:D2:E5`). Google's owner root "Hawksbill Root v1 prod" (SHA-256 `46:B5:FD:35:1D:56:A0:72:1C:A0:AF:CD:17:31:C0:F7:B7:4E:39:41:EB:81:8B:FD:0E:C3:6E:29:DF:0D:E0:95`, valid to 2030-01-01) is copied from Google's `verify_attestation_chains.py`. Microsoft's validator also checks a partition chain, but it starts from a self-signed certificate taken from the submitted bundle, so it is not used. *(Since 1.7.0)* the comment blocks name the manufacturers' files: `https://www.marvell.com/content/dam/marvell/en/public-collateral/security-solutions/liquid_security_certificate.zip` for the Marvell roots (compared on 2026-10-31: it holds another certificate for the first root's key, and not the LS2 root, which Marvell shows on its LiquidSecurity 2 certificate page: https://www.marvell.com/products/security-solutions/nitrox-hs-adapters/liquidsecurity2-certificate-ls2-g-axxx-mi-f-bo.html) and `https://www.gstatic.com/cloudhsm/roots/global_1498867200.pem` for Google's owner root. Operators should re-verify the roots against them.
+  - **Thales Luna** (Chrysalis-ITS Root key), **Crypto4A** (C4A_RCA key), **Fortanix** (Attestation and Provisioning Root CA) and **Entrust nShield** (KWARN-1 key) — see the table below.
   - All pinned trust anchors — placeholder or real — are loaded fail-closed: if any cannot be parsed, the Spring Boot application refuses to start.
+  - *(Since 1.7.0)* every anchor has a "Pinned trust anchor" comment block beside its constant, and `TrustAnchorPinningTest` (8 tests, the same in gatekeeper) asserts its subject, SHA-256 and validity, that each certificate is self-issued and its self-signature verifies, the key hashes, and that the verifier built by its no-argument constructor holds exactly this anchor, so changing a constant fails the build. SHA-256 is of the DER certificate unless stated:
+
+    | Anchor (constant) | Pinned as | SHA-256 | Validity (UTC) |
+    | --- | --- | --- | --- |
+    | Yubico YubiHSM Root CA (`YubicoVerifier.YUBICO_ROOT_CA`) | PKIX trust anchor | `09:4A:3A:C4:93:C2:BD:CD:65:A5:4B:DF:40:19:0F:52:BB:03:F7:15:63:97:A3:FC:69:D8:AA:9A:39:2F:B7:24` | 2017-01-01 – 2071-10-05 |
+    | Securosys `CN=PRIMUS_HSM_ROOTKEY` (`SecurosysVerifier.SECUROSYS_ROOT_CA`) | PKIX trust anchor | `D2:C9:3D:8F:69:BC:8D:62:4E:37:F2:5B:9E:6E:7B:EC:41:76:1A:AB:86:4C:94:F3:79:36:1B:9B:78:A9:DB:97` | 2024-08-21 – 2054-08-14 |
+    | Marvell LiquidSecurity root (`MarvellAttestation.MARVELL_ROOT_PEM`) | issuer of the card certificate (Azure, Google, Marvell) | `23:01:43:DF:00:E0:B4:52:74:3E:06:8A:5B:3F:C0:8D:F8:F0:6C:EF:C4:85:4E:A6:27:AE:B7:EB:D7:0E:E2:F4` | 2024-07-25 – 2034-07-23 |
+    | Marvell LiquidSecurity 2 root (`MarvellAttestation.MARVELL_LS2_ROOT_PEM`) | as above | `17:64:4D:E0:D3:3B:C7:3B:2F:4E:F4:C2:0A:11:F6:C8:CC:1F:72:3A:4C:D8:3E:E6:00:36:1C:BB:24:D8:D2:E5` | 2024-07-22 – 2034-07-20 |
+    | Google Hawksbill Root v1 prod (`GoogleCloudHsmVerifier.HAWKSBILL_ROOT_PEM`) | issuer of the owner card and partition certificates | `46:B5:FD:35:1D:56:A0:72:1C:A0:AF:CD:17:31:C0:F7:B7:4E:39:41:EB:81:8B:FD:0E:C3:6E:29:DF:0D:E0:95` | 2017-07-01 – 2030-01-01 |
+    | Thales Chrysalis-ITS Root, serial 80450000000D (`ThalesLunaVerifier.CHRYSALIS_ROOT_PEM`) | public key | certificate `69:6A:7E:E6:7B:C4:FA:CF:F6:09:11:BC:0B:24:A3:A6:BC:E7:5A:2E:F4:C4:23:18:44:8A:DD:45:01:B6:99:69`; key `5D:31:FC:46:2A:E8:A1:A5:32:7B:14:9F:F4:3A:A6:D8:67:A2:8D:7E:17:CA:1C:CA:7E:7D:51:4C:F8:CD:C1:32` | 2002-01-01 – 2032-01-01 |
+    | Crypto4A C4A_RCA (`Crypto4AVerifier.C4A_ROOT_PEM`) | public key | certificate `63:7E:6A:7E:95:DE:D7:27:2F:5B:3E:5A:0D:94:41:4D:23:E1:B5:4F:9E:2E:65:93:B6:41:75:62:BB:B5:43:3C`; key `40:14:6C:BF:79:12:E0:A2:9C:A6:01:F9:A1:63:5E:37:BA:8D:69:A4:CD:B8:8A:9A:F1:63:16:33:E7:34:9B:F0` | 2020-07-13 – 2045-07-13 |
+    | Fortanix Attestation and Provisioning Root CA (`FortanixVerifier.FORTANIX_ROOT_PEM`) | PKIX trust anchor | certificate `D7:1A:15:B3:4E:78:1E:9E:F9:13:54:FA:BA:E8:B1:15:E0:62:B8:97:95:FE:C3:AE:C0:E0:45:FE:D2:66:C2:C2`; key `D0:12:75:CC:16:BD:C2:DA:D8:CD:51:53:2B:CF:C9:E6:9E:DB:99:63:A4:32:4A:A5:E1:29:45:37:2A:FB:5E:15` | 2023-09-01 – 2033-08-29 |
+    | Entrust nShield KWARN-1, ECDSA P-521 (`NShieldVerifier.KWARN_1_X`, `KWARN_1_Y`) | bare public key | DER SubjectPublicKeyInfo built from X and Y: `DF:8F:05:A3:95:96:BB:9C:4A:8C:C4:D3:B6:DE:10:60:7F:36:2D:71:82:E8:81:EA:82:A5:ED:C7:CD:CD:F8:4F` | none |
+
+    The full subject DNs and validity instants are in the comment blocks and in gatekeeper's `README.md` ("Pinned trust anchors"). Compare each value with what the manufacturer publishes before relying on it. *(Since 1.7.0)* the comment blocks also name the manufacturers' sources for the other four: Thales `https://thalesdocs.com/gphsm/luna/10.2/docs/network/Content/admin_partition/confirm/safenet-root.pem` (the root `cmu verifyhsm` uses; compared on 2026-10-31: another certificate, serial 804500000007, for the pinned key, so compare the key SHA-256), Fortanix `https://pki.fortanix.com/Fortanix_Attestation_and_Provisioning_Root_CA.crt` (the constant is byte-identical to the root in Fortanix's published sample statement), Entrust `https://nshielddocs.entrust.com/app-notes/warrants/root-key.html` (the first and last 16 hex digits of X and Y against the page; the whole key by Entrust's example warrants, which verify under it), and for Crypto4A `https://support.crypto4a.com/cs/Certificate`, and the PKI Consortium's `validation/crypto4a-qasm.md` (https://github.com/pkic/remote-key-attestation/blob/main/validation/crypto4a-qasm.md), which Crypto4A contributed itself (pull request #21, 2024). **Every anchor is confirmed against the manufacturer's own material:** Yubico's and Securosys's by the real attestations from the reference hardware, which validate under them; Google's and Fortanix's by being byte-identical to the root in the manufacturer's published sample; Entrust's by Entrust's example warrants, which verify under KWARN-1; Thales's by its published `safenet-root.pem`, another certificate for the same key; the first Marvell root by Marvell's `liquid_security_certificate.zip`, which holds another certificate (serial C0EAADF434DEDC17, expired 2025-11-16) for the same key; the Marvell LS2 root by Marvell's LiquidSecurity 2 certificate page (`liquidsecurity2-certificate-ls2-g-axxx-mi-f-bo.html`), which shows another certificate (2022-01-07 to 2032-01-05) with the same RSA modulus; Crypto4A's by being byte-identical to C4A_RCA on Crypto4A's support site (`https://support.crypto4a.com/cs/Certificate`) and in the file Crypto4A contributed to the PKI Consortium's repository (pull request #21).
+  - **Replacing a trust anchor** *(since 1.7.0)*. `swish.trust-anchors.<key>` names a PEM file that replaces the pinned anchor in the verifiers using it; blank, the default, keeps the pinned anchor and verification as before (`TrustAnchorsTest`, `TrustAnchorDefaultWiringTest`). `yubico`, `securosys`, `google-owner`, `thales` and `fortanix` take one self-signed RSA certificate, `crypto4a` one self-signed EC P-384 certificate (for Thales and Crypto4A the verifier uses its key), `marvell` one or more self-signed RSA certificates, which replace both Marvell roots for the Azure, Google and Marvell verifiers together, and `entrust` one PEM `PUBLIC KEY` on P-521 (named curve, uncompressed point). Anything else — a missing file or one over 1 MiB, DER instead of PEM (convert with `openssl x509 -inform DER -in root.crt -out root.pem`), the wrong block type or count, key type or curve, a certificate that is not self-issued and self-signed, a duplicate, an unknown key such as `yubikey` or a key named twice — stops start-up with an `IllegalStateException` naming the property and the path. Start-up logs each override at INFO with its path and SHA-256 (for certificates also subject and validity), and a WARN with the override's and the pinned SHA-256 (for certificates also whether the key is the same) when it is not the pinned anchor. hsm has no endpoint that reports the anchors in use; that log is the record. Not checked: validity (only logged), BasicConstraints, key usage, key size; the Thales, Crypto4A and Fortanix key-hash checks apply only to the pinned constants. Set the keys by environment variable, command-line argument, system property or external configuration file; `SpringApplication.setDefaultProperties` does not work, because the packaged `application.yaml` declares them. Environment variables have not been tested. **Tested only with test roots and with the pinned anchors written to files.**
 - **Signatory-rights registry**: replace the default `FailClosedSignatoryRightsVerifier` with a production `SignatoryRightsVerifier` adapter wired to an authoritative source (Swish agreement registry / Bolagsverket). Configure via `swish.signatory-rights.mode=<your-adapter>`. The fail-closed default will reject every request, SIGNING and TRANSPORT alike, until this is done.
 - **Marvell attestation format**: `MarvellAttestation` follows Marvell's "LiquidSecurity HSM - Software Key Attestation" page (response layout with key-1/key-2 offsets, attribute numbers including `OBJ_ATTR_MODULUS` `0x0120`, KCV `0x0173` and EKCV `0x1003`, and a parsed RSA key-pair example), Marvell's MIT-licensed `verify_pubkey.py`, Microsoft's MIT-licensed parser and validator (byte offsets, firmware 2.x/3.x signatures) and Google's sample (gzip, SHA-256 PKCS#1 v1.5, owner chain). Neither cloud vendor's tool binds the attestation to a public key; here the private key must match the CSR key through its modulus or EKCV (SHA-256 of the DER public key, as `verify_pubkey.py` computes it and Marvell's example confirms), directly or through the public-key object in the same signed blob. Until a real Azure or Google attestation is committed as a fixture and `MarvellAttestation.FORMAT_CONFIRMED_BY_REAL_SAMPLE` is set, both verifiers add `MARVELL_FORMAT_UNCONFIRMED` and never report a valid attestation.
 - **BankID XML-DSig integration test vectors**: the test suite builds its own PKI in-memory with BouncyCastle (see `src/test/java/.../testsupport/TestPki.java`) and asserts fail-closed behaviour. Before production, extend the suite with real BankID test vectors obtained from BankID's development environment.
-- **Reproducibility**: run `mvn -B test` — all unit tests exercise the real PKIX `CertPathValidator` against the pinned root certificate of each verifier with no mocks. See `PEER_REVIEW_GUIDE.md` for the full list of reproducible assertions; the substantive-fix history is preserved in the Git commit log.
+- **Reproducibility**: run `mvn -B test` — the verifier tests run the real PKIX `CertPathValidator` and signature checks without network or HSM: the real fixtures against the pinned roots, the negative paths against in-memory `TestPki` roots. Some service, controller, gatekeeper-client and fixture tests also use Mockito doubles. See `PEER_REVIEW_GUIDE.md` for the full list of reproducible assertions; the substantive-fix history is preserved in the Git commit log.
 
 Known limitations are documented in `PEER_REVIEW_GUIDE.md` and `THREAT_MODEL.md` at the repository root.
 
 ## Companion repositories — the triadic system (since v1.2.0)
 
-This repository is the financial-entity-side artefact of a three-component reference implementation. The triadic system together operationalises the data-minimised quadruple-triangulation model described in the companion academic articles (Article 1 §4.2, Article 2 §9.3):
+This repository is the financial-entity-side artefact of a three-component reference implementation. The triadic system together operationalises the data-minimised quadruple-triangulation model described in the companion academic articles (Article 1 §6.2, Article 2 §9.3), over four data sources — Getswish AB's allocation register, the gatekeeper audit log, the RIX-INST settlement log and the recipient-side transaction registration — of which the code produces the gatekeeper audit log and the other three are external (see `CROSS_REFERENCE.md`):
 
 - **hsm** — this repository, financial-entity-side HSM attestation verification core: <https://github.com/niklasgillstrom/hsm> ([10.5281/zenodo.19930310](https://doi.org/10.5281/zenodo.19930310), concept DOI)
 - **gatekeeper** — NCA-operated certificate-issuance gate; from v1.1.0 also exposes `POST /api/v1/verify` for settlement-time signature verification: <https://github.com/niklasgillstrom/gatekeeper> ([10.5281/zenodo.19930395](https://doi.org/10.5281/zenodo.19930395), concept DOI)

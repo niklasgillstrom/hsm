@@ -99,6 +99,37 @@ class HttpGatekeeperClientDeserializationTest {
                 .isEqualTo(EXPECTED_GOLDEN);
     }
 
+    /**
+     * From 1.6.0 the gatekeeper's verification response also carries
+     * {@code hsmFirmwareVersion}, {@code hsmFipsIndicator} and
+     * {@code hsmFipsApprovedMode}. {@link VerifyResponse} has no such fields;
+     * {@link HttpGatekeeperClient#MAPPER} ignores unknown properties, so the
+     * response still deserializes, and as the fields are not in the signed
+     * canonical form the receipt canonicalizes to the same golden bytes.
+     */
+    @Test
+    void verifyResponseWithFirmwareAndFipsFieldsStillDeserializesToTheGoldenBytes() throws Exception {
+        String withNewFields = VERIFY_BODY.replace("\"hsmSerialNumber\": \"20783176\",",
+                "\"hsmSerialNumber\": \"20783176\",\n"
+                        + "  \"hsmFirmwareVersion\": \"2.2.0\",\n"
+                        + "  \"hsmFipsIndicator\": 5,\n"
+                        + "  \"hsmFipsApprovedMode\": null,");
+        assertThat(withNewFields).contains("\"hsmFipsIndicator\": 5").isNotEqualTo(VERIFY_BODY);
+
+        VerifyResponse r = HttpGatekeeperClient.MAPPER.readValue(withNewFields, VerifyResponse.class);
+
+        assertThat(r.getVerificationId()).isEqualTo("test-uuid");
+        assertThat(r.getHsmSerialNumber()).isEqualTo("20783176");
+        assertThat(r.isCompliant()).isTrue();
+        assertThat(new String(ReceiptCanonicalizer.canonicalize(r), StandardCharsets.UTF_8))
+                .isEqualTo(EXPECTED_GOLDEN);
+
+        String approved = withNewFields.replace("\"hsmFipsApprovedMode\": null", "\"hsmFipsApprovedMode\": true");
+        assertThat(new String(ReceiptCanonicalizer.canonicalize(
+                HttpGatekeeperClient.MAPPER.readValue(approved, VerifyResponse.class)), StandardCharsets.UTF_8))
+                .isEqualTo(EXPECTED_GOLDEN);
+    }
+
     @Test
     void issuanceConfirmResponseDeserializes() throws Exception {
         IssuanceConfirmResponse r =

@@ -633,6 +633,12 @@ public class AttestationService {
         boolean keyExportable = true;
         boolean publicKeyMatch = false;
         boolean attestationChainValid = false;
+        // What the attestation states about the HSM's firmware and FIPS mode. Only the
+        // Yubico format carries it, and it counts only from a chain that
+        // validated to the pinned root.
+        String hsmFirmwareVersion = null;
+        Integer hsmFipsIndicator = null;
+        Boolean hsmFipsApprovedMode = null;
 
         if (certType == CertificateType.SIGNING) {
             HsmVendor vendor = detectVendor(request.getHsmVendor());
@@ -668,6 +674,11 @@ public class AttestationService {
                         hsmModel = "YubiHSM 2";
                         keyOrigin = result.getKeyOrigin();
                         keyExportable = result.isKeyExportable();
+                        if (result.isChainValid()) {
+                            hsmFirmwareVersion = result.getFirmware();
+                            hsmFipsIndicator = result.getFipsIndicator();
+                            hsmFipsApprovedMode = result.getFipsApprovedMode();
+                        }
                         if (!result.isValid()) {
                             errors.addAll(result.getErrors());
                         }
@@ -785,6 +796,10 @@ public class AttestationService {
                     }
                     default -> errors.add("Vendor " + vendor + " not yet implemented");
                 }
+
+                // FIPS-approved mode, when the key policy requires the
+                // attestation to state it (swish.key-policy.require-fips-approved-mode).
+                keyPolicy.fipsModeViolation(vendor, hsmFipsApprovedMode).ifPresent(errors::add);
             }
         }
 
@@ -802,6 +817,9 @@ public class AttestationService {
                 .hsmVendor(hsmVendor)
                 .hsmModel(hsmModel)
                 .hsmSerialNumber(hsmSerial)
+                .hsmFirmwareVersion(hsmFirmwareVersion)
+                .hsmFipsIndicator(hsmFipsIndicator)
+                .hsmFipsApprovedMode(hsmFipsApprovedMode)
                 .publicKeyMatch(publicKeyMatch)
                 .attestationChainValid(attestationChainValid)
                 .keyOrigin(keyOrigin)
